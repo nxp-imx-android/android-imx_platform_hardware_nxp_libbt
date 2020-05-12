@@ -18,21 +18,8 @@ LOCAL_PATH := $(call my-dir)
 BOARD_UART_DOWNLOAD_FW := false
 # v2 is for 8887-FP101, and v3 is for other chips.
 BOARD_UART_FW_LOADER_VERSION = v3
-# 8997 for 8mp
-BOARD_NXP_CHIP := 8997
-#BOARD_NXP_CHIP := 9098
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := bt_vendor.conf
-LOCAL_MODULE_CLASS := ETC
-LOCAL_MODULE_PATH := $(TARGET_OUT_VENDOR)/etc/bluetooth
-LOCAL_MODULE_TAGS := optional
-LOCAL_PROPRIETARY_MODULE := true
-LOCAL_SRC_FILES := conf/bt_vendor_$(BOARD_NXP_CHIP).conf
-include $(BUILD_PREBUILT)
 
 # libbt-vendor.so
-
 include $(CLEAR_VARS)
 BDROID_DIR := $(TOP_DIR)system/bt
 
@@ -69,4 +56,16 @@ LOCAL_MULTILIB := both
 LOCAL_PROPRIETARY_MODULE := true
 
 include $(BUILD_SHARED_LIBRARY)
+ifeq ($(TARGET_PRODUCT), evk_8mp)
+    include $(LOCAL_PATH)/conf/nxp/evk_8mp/Android.mk
 endif
+ifeq ($(TARGET_PRODUCT), evk_8mq)
+    include $(LOCAL_PATH)/conf/nxp/evk_8mq/Android.mk
+endif
+ifeq ($(TARGET_PRODUCT), evk_8mn)
+    include $(LOCAL_PATH)/conf/nxp/evk_8mn/Android.mk
+endif
+ifeq ($(TARGET_PRODUCT),$(filter $(TARGET_PRODUCT),mek_8q mek_8q_car mek_8q_car2))
+    include $(LOCAL_PATH)/conf/nxp/mek_8q/Android.mk
+endif
+endif # BOARD_HAVE_BLUETOOTH_NXP

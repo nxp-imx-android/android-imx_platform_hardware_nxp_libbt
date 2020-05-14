@@ -322,7 +322,7 @@ static int set_iSecondBaudrate(char *p_conf_name, char *p_conf_value, int param)
 
 static const conf_entry_t conf_table[] = {{"mchar_port", set_mchar_port, 0},
                                           {"mbt_port", set_mbt_port, 0},
-                                          {"is_uart_port", set_is_uart_port, 0}, 
+                                          {"is_uart_port", set_is_uart_port, 0},
                                           {"uart_break_before_open", set_uart_break_before_open, 0},
                                           {"baudrate_bt", set_baudrate_bt, 0},
                                           {"baudrate_fw_init", set_baudrate_fw_init, 0},

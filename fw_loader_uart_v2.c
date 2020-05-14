@@ -40,7 +40,7 @@
 #define VERSION "M206"
 #define MAX_LENGTH 0xFFFF  // Maximum 2 byte value
 #define END_SIG_TIMEOUT 2500
-#define MAX_CTS_TIMEOUT    5000         //5s 
+#define MAX_CTS_TIMEOUT    5000         //5s
 #define STRING_SIZE 6
 #define HDR_LEN 16
 #define CMD4 0x4
@@ -100,7 +100,7 @@ jmp_buf resync;  // Protocol restart buffer used in timeout cases.
  *
  * Description:
  *   This function basically waits for reception
- *   of character 0xa5 on UART Rx. If no 0xa5 is 
+ *   of character 0xa5 on UART Rx. If no 0xa5 is
  *   received, it will kind of busy wait checking for
  *   0xa5.
  *
@@ -117,7 +117,7 @@ jmp_buf resync;  // Protocol restart buffer used in timeout cases.
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs)
 {
   uint8 ucDone = 0; // signature not Received Yet.
@@ -127,7 +127,7 @@ static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs)
   ucRcvdHeader = 0xFF;
   startTime = fw_upload_GetTime();
   while (!ucDone)
-  { 
+  {
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&ucRcvdHeader,1);
     if ((ucRcvdHeader == BOOT_HEADER) || (ucRcvdHeader == VERSION_HEADER) || (ucRcvdHeader == HELPER_HEADER))
     {
@@ -172,14 +172,14 @@ static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs)
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static uint16 fw_upload_WaitFor_Len(FILE* pFile)
-{ 
-  uint8  uiVersion; 
+{
+  uint8  uiVersion;
   // Length Variables
   uint16 uiLen = 0x0;
   uint16 uiLenComp = 0x0;
-  // uiLen and uiLenComp are 1's complement of each other. 
+  // uiLen and uiLenComp are 1's complement of each other.
   // In such cases, the XOR of uiLen and uiLenComp will be all 1's
   // i.e 0xffff.
   uint16 uiXorOfLen = 0xFFFF;
@@ -200,7 +200,7 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
       fw_upload_ComWriteChar(mchar_fd, (int8)BOOT_HEADER_ACK);
 	  if (ucRcvdHeader == VERSION_HEADER)
       {
-        // We have received the Chip Id and Rev Num that the 
+        // We have received the Chip Id and Rev Num that the
         // helper intended to send. Ignore the received
 	// Chip Id, Rev Num and proceed to Download.
 	uiVersion = (uiLen >> 8) & 0xF0;
@@ -209,7 +209,7 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
 	if(ucHelperOn == TRUE)
 	{
 	  fseek(pFile, 0, SEEK_SET);
-	  ulCurrFileSize = 0; 
+	  ulCurrFileSize = 0;
           ulLastOffsetToSend = 0xFFFF;
 	}
         longjmp(resync, 1);
@@ -222,7 +222,7 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
     PRINT("\n    NAK case: bootloader LEN = %x bytes \n ", uiLen);
     PRINT("\n    NAK case: bootloader LENComp = %x bytes \n ", uiLenComp);
 #endif
-    // Failure due to mismatch.	  
+    // Failure due to mismatch.
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
     // Start all over again.
     longjmp(resync, 1);
@@ -235,7 +235,7 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
  * Name: fw_upload_GetHeaderStartBytes
  *
  * Description:
- *   This function gets 0xa5 and it's following 4 bytes length.    
+ *   This function gets 0xa5 and it's following 4 bytes length.
  *
  * Conditions For Use:
  *   None.
@@ -249,13 +249,13 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
 {
   BOOLEAN ucDone = FALSE, ucStringCnt = 0, i;
-  
+
   while (!ucDone)
-  { 
+  {
     ucRcvdHeader = 0xFF;
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&ucRcvdHeader,1);
 
@@ -286,7 +286,7 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
  * Name: fw_upload_GetLast5Bytes
  *
  * Description:
- *   This function gets last valid request.    
+ *   This function gets last valid request.
  *
  * Conditions For Use:
  *   None.
@@ -300,7 +300,7 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static void fw_upload_GetLast5Bytes(uint8 *buf)
 {
   uint8  a5cnt, i;
@@ -308,12 +308,12 @@ static void fw_upload_GetLast5Bytes(uint8 *buf)
   uint16 uiTempLen = 0;
   int32  fifosize;
   BOOLEAN alla5times = FALSE;
-  
-  // initialise 
+
+  // initialise
   memset(ucString, 0x00, STRING_SIZE);
 
   fifosize = fw_upload_GetBufferSize(mchar_fd);
-  
+
   fw_upload_GetHeaderStartBytes(ucString);
   fw_upload_lenValid(&uiTempLen, ucString);
 
@@ -325,7 +325,7 @@ static void fw_upload_GetLast5Bytes(uint8 *buf)
     uiErrCase = FALSE;
   }
   else // start to get last valid 5 bytes
-  { 
+  {
 #ifdef DEBUG_PRINT
     PRINT("=========>fail case\n");
 #endif
@@ -355,7 +355,7 @@ static void fw_upload_GetLast5Bytes(uint8 *buf)
             {
               if (ucTemp[i] == BOOT_HEADER)
               {
-                a5cnt ++; 
+                a5cnt ++;
               }
             }
             alla5times = TRUE;
@@ -425,7 +425,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
      	  PRINT("\n====>  Sending first chunk...\n");
      	  PRINT("\n====>  Sending %d bytes...\n", uiBytesToSend);
 #endif
-     	  fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiBytesToSend); 
+     	  fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiBytesToSend);
      	  uiBytesToSend = uiDataLen;
      	  if(uiBytesToSend == HDR_LEN)
      	  {
@@ -537,7 +537,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
  * Name: fw_upload_WaitFor_Offset
  *
  * Description:
- *   This function gets offset value from helper.    
+ *   This function gets offset value from helper.
  *
  * Conditions For Use:
  *   None.
@@ -553,11 +553,11 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
  *
  *****************************************************************************/
 static uint32 fw_upload_WaitFor_Offset()
-{  
+{
   uint32 ulOffset = 0x0;
   uint32 ulOffsetComp = 0x0;
 
-  // uiLen and uiLenComp are 1's complement of each other. 
+  // uiLen and uiLenComp are 1's complement of each other.
   // In such cases, the XOR of uiLen and uiLenComp will be all 1's
   // i.e 0xffff.
   uint32 uiXorOfOffset = 0xFFFFFFFF;
@@ -568,7 +568,7 @@ static uint32 fw_upload_WaitFor_Offset()
 
   // Check if the length is valid.
   if ((ulOffset ^ ulOffsetComp) == uiXorOfOffset) // All 1's
-  { 
+  {
 #ifdef DEBUG_PRINT
     PRINT("\n    Helper ask for offset %d \n ", ulOffset);
 #endif
@@ -579,7 +579,7 @@ static uint32 fw_upload_WaitFor_Offset()
     PRINT("\n    NAK case: helper Offset = %x bytes \n ", ulOffset);
     PRINT("\n    NAK case: helper OffsetComp = %x bytes \n ", ulOffsetComp);
 #endif
-    // Failure due to mismatch.	  
+    // Failure due to mismatch.
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
 
     // Start all over again.
@@ -593,7 +593,7 @@ static uint32 fw_upload_WaitFor_Offset()
  * Name: fw_upload_WaitFor_ErrCode
  *
  * Description:
- *   This function gets error code from helper.    
+ *   This function gets error code from helper.
  *
  * Conditions For Use:
  *   None.
@@ -607,13 +607,13 @@ static uint32 fw_upload_WaitFor_Offset()
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static uint16 fw_upload_WaitFor_ErrCode()
 {
   uint16 uiError = 0x0;
   uint16 uiErrorCmp = 0x0;
   uint16 uiXorOfErrCode = 0xFFFF;
-  
+
   // Read the Error Code.
   fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiError, 2);
   fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiErrorCmp, 2);
@@ -644,7 +644,7 @@ static uint16 fw_upload_WaitFor_ErrCode()
     PRINT("\n    NAK case: helper ErrorCode = %x bytes \n ", uiError);
     PRINT("\n    NAK case: helper ErrorCodeComp = %x bytes \n ", uiErrorCmp);
 #endif
-    // Failure due to mismatch.	  
+    // Failure due to mismatch.
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
     // Start all over again.
     longjmp(resync, 1);
@@ -657,7 +657,7 @@ static uint16 fw_upload_WaitFor_ErrCode()
  * Name: fw_upload_SendLenBytesToHelper
  *
  * Description:
- *   This function sends Len bytes to the Helper.    
+ *   This function sends Len bytes to the Helper.
  *
  * Conditions For Use:
  *   None.
@@ -673,7 +673,7 @@ static uint16 fw_upload_WaitFor_ErrCode()
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSend, uint32 ulOffset)
 
 {
@@ -685,7 +685,7 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
 #endif
     fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucByteBuffer, uiLenToSend);
   }
-  else  
+  else
   {
     //uint16 uiNumRead = 0;
     // The length requested by the Helper is equal to the Block
@@ -693,7 +693,7 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
     // block sizes are 128, 256, 512.
     // uiLenToSend % 16 == 0. This means the previous packet
     // was error free (CRC ok) or this is the first packet received.
-    //  We can clear the ucByteBuffer and populate fresh data. 
+    //  We can clear the ucByteBuffer and populate fresh data.
     memset (ucByteBuffer, 0, sizeof(ucByteBuffer));
     memcpy(ucByteBuffer,pFileBuffer+ulOffset,uiLenToSend);
     ulCurrFileSize += uiLenToSend;
@@ -707,7 +707,7 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
  * Name: fw_upload_SendIntBytes
  *
  * Description:
- *   This function sends 4 bytes and 4bytes' compare.    
+ *   This function sends 4 bytes and 4bytes' compare.
  *
  * Conditions For Use:
  *   None.
@@ -721,12 +721,12 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static void fw_upload_SendIntBytes(uint32 ulBytesToSent)
 {
   uint8 i, uTemp[9], uiLocalCnt = 0;
   uint32 ulBytesToSentCmp;
-  
+
   ulBytesToSentCmp = ulBytesToSent ^ 0xFFFFFFFF;
 
   for (i = 0; i < 4; i ++)
@@ -746,7 +746,7 @@ static void fw_upload_SendIntBytes(uint32 ulBytesToSent)
  * Name: fw_upload_SendLenBytes
  *
  * Description:
- *   This function sends Len bytes(header+data) to the boot code.    
+ *   This function sends Len bytes(header+data) to the boot code.
  *
  * Conditions For Use:
  *   None.
@@ -761,7 +761,7 @@ static void fw_upload_SendIntBytes(uint32 ulBytesToSent)
  * Notes:
  *   None.
  *
- *****************************************************************************/ 
+ *****************************************************************************/
 static uint16 fw_upload_SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend)
 {
   uint16 ucDataLen, uiLen;
@@ -773,7 +773,7 @@ static uint16 fw_upload_SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend)
   if(!ucCmd5Sent)
   {
     // put header and data into temp buffer first
-    memcpy(ucByteBuffer, ucCmd5Patch, uiLenToSend); 
+    memcpy(ucByteBuffer, ucCmd5Patch, uiLenToSend);
     //get data length from header
     ucDataLen = fw_upload_GetDataLen(ucByteBuffer);
     memcpy(&ucByteBuffer[uiLenToSend], &ucCmd5Patch[uiLenToSend], ucDataLen);
@@ -896,7 +896,7 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
 
     // Read the 'Length' bytes requested by Helper
     uiLenToSend = fw_upload_WaitFor_Len(pFile);
-  
+
     if(ucRcvdHeader == HELPER_HEADER)
     {
       ucHelperOn = TRUE;
@@ -924,7 +924,7 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
       }
       else if (uiErrCode > 0)
       {
-      /*delay 20ms to make multiple uiErrCode == 1 has been sent, after 20ms, if get 
+      /*delay 20ms to make multiple uiErrCode == 1 has been sent, after 20ms, if get
        *uiErrCode = 1 again, we consider 0x6b is missing.
        */
         fw_upload_DelayInMs(20);
@@ -942,12 +942,12 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
       }while(uiLenToSend != 0);
   	  // If the Length requested is 0, download is complete.
       if (uiLenToSend == 0)
-      {	  
+      {
         bRetVal = TRUE;
         break;
       }
     }
-    
+
   }
   if(pFileBuffer != NULL)
   {

@@ -53,4 +53,4 @@ typedef unsigned char BOOLEAN;
 
 /*==================== Function Prototypes ======================================*/
 int32 init_uart(int8 * dev, int32 dwBaudRate, uint8 ucFlowCtrl);
-#endif 
+#endif

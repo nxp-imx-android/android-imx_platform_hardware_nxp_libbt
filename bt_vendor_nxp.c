@@ -110,6 +110,13 @@ typedef struct {
 #define PROP_BLUETOOTH_FW_DOWNLOADED "bluetooth.mrvl.fw_downloaded"
 #define PROP_BLUETOOTH_DELAY "bluetooth.mrvl.fw_downloaded_delay"
 
+/*
+ * * Defines for wait for Bluetooth firmware ready
+ * * Specify durations between polls and max wait time
+ * */
+#define POLL_DRIVER_DURATION_US (100000)
+#define POLL_DRIVER_MAX_TIME_MS (20000)
+
 /******************************************************************************
 **  Variables
 ******************************************************************************/
@@ -1078,6 +1085,20 @@ static int bt_vnd_mrvl_if_op(bt_vendor_opcode_t opcode, void* param) {
 #endif
         bluetooth_opened = get_prop_int32(PROP_BLUETOOTH_OPENED);
         if (!bluetooth_opened) {
+
+			// NXP Bluetooth use combo firmware which is loaded at wifi driver probe.
+			// This function will wait to make sure basic client netdev is created
+			int count = (POLL_DRIVER_MAX_TIME_MS * 1000) / POLL_DRIVER_DURATION_US;
+			FILE *fd;
+
+			while(count-- > 0){
+				if ((fd = fopen("/sys/class/net/wlan0", "r")) != NULL) {
+					fclose(fd);
+					break;
+				}
+				usleep(POLL_DRIVER_DURATION_US);
+			}
+
           if (config_uart()) {
             error("config_uart failed");
             set_prop_int32(PROP_BLUETOOTH_OPENED, 0);

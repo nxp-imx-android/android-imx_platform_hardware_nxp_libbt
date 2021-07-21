@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2020 NXP
+ *  Copyright 2018-2021 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 
 #ifndef _BT_VENDOR_NXP_H
 #define _BT_VENDOR_NXP_H
-/*===================== Include Files ============================================*/
+
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -27,9 +27,11 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include "bt_vendor_lib.h"
 
-
-/*==================== Typedefs =================================================*/
+/******************************************************************************
+**  Local type definitions
+******************************************************************************/
 typedef unsigned long long uint64;
 typedef unsigned int uint32;
 typedef unsigned short uint16;
@@ -39,18 +41,68 @@ typedef short int16;
 typedef char int8;
 typedef unsigned char BOOLEAN;
 
+/******************************************************************************
+**  Constants & Macros
+******************************************************************************/
 
-/*===================== Macros ===================================================*/
+#define BT_HAL_VERSION "008.004"
+
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
 #define RW_FAILURE (~RW_SUCCESSFUL)
-
 #define BIT(x) (0x1 << x)
 
 #define TRUE 1
 #define FALSE 0
-/*===================== Global Vars ==============================================*/
+#define WRITE_BD_ADDRESS_SIZE 8
 
-/*==================== Function Prototypes ======================================*/
-int32 init_uart(int8 * dev, int32 dwBaudRate, uint8 ucFlowCtrl);
+#define DOWNLOAD_SUCCESS 0x0
+#define OPEN_SERIAL_PORT_OR_FILE_ERROR 0x1
+#define FEEK_SEEK_ERROR 0x2
+#define FILESIZE_IS_ZERO 0x3
+#define HEADER_SIGNATURE_TIMEOUT 0x4
+#define READ_FILE_FAIL 0x5
+#define CHANGE_BAUDRATE_FAIL 0x6
+#define CHANGE_TIMEOUT_VALUE_FAIL 0x7
+#define OPEN_FILE_FAIL 0x8
+#define FILE_MODE_CANNOT_CHANGE 0X9
+#define UNEXPECTED_BEHAVIOUR_IN_SETJMP 0xA
+#define MALLOC_RETURNED_NULL 0xB
+#define START_INDICATION_NOT_FOUND 0xC
+
+/* Run-time configuration file */
+#ifndef VENDOR_LIB_CONF_FILE
+#define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"
+#endif
+
+#ifndef NXP_LOAD_BT_CALIBRATION_DATA
+#define NXP_LOAD_BT_CALIBRATION_DATA FALSE
+#endif
+
+#ifndef NXP_VND_DBG
+#define NXP_VND_DBG FALSE
+#endif
+
+#if (NXP_VND_DBG == TRUE)
+#define VNDDBG(fmt, ...) \
+  ALOGD("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#else
+#define VNDDBG(fmt, ...)
+#endif
+
+/***********************************************************
+ *  Externs
+ ***********************************************************
+ */
+extern unsigned char* bdaddr;
+extern int write_bdaddrss;
+extern uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE];
+extern const bt_vendor_callbacks_t* vnd_cb;
+extern char pFilename_cal_data[];
+
+/*****************************************************************************
+**   Functions Prototype
+*****************************************************************************/
+void hw_config_start(void);
+int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl);
 #endif

@@ -1,4 +1,6 @@
-# Copyright 2020 NXP
+#
+# Copyright 2012 The Android Open Source Project
+# Portions copyright 2012-2013, 2015, 2018-2021 NXP
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+
 ifneq ($(BOARD_HAVE_BLUETOOTH_NXP),)
 
 LOCAL_PATH := $(call my-dir)
@@ -28,7 +32,8 @@ LOCAL_C_INCLUDES += \
 
 LOCAL_SRC_FILES := \
     bt_vendor_nxp.c \
-    fw_loader_io.c
+    fw_loader_io.c \
+    hardware_nxp.c
 
 ifneq ($(BOARD_UART_DOWNLOAD_FW), false)
 LOCAL_CFLAGS += -DUART_DOWNLOAD_FW

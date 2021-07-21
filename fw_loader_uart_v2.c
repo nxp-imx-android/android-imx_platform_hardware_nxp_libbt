@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2020 NXP
+ *  Copyright 2009-2021 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -212,6 +212,20 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
 	  ulCurrFileSize = 0;
           ulLastOffsetToSend = 0xFFFF;
 	}
+        // Ensure any pending write data is completely written
+        if (0 == tcdrain(mchar_fd))
+        {
+#ifdef DEBUG_PRINT
+          PRINT("\n\t tcdrain succeeded\n");
+#endif
+        }
+        else
+        {
+#ifdef DEBUG_PRINT
+          PRINT("\n\t Version ACK, tcdrain failed with errno = %d\n", errno);
+#endif
+        }
+
         longjmp(resync, 1);
       }
     }
@@ -500,6 +514,19 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
         uiBytesToSend = uiDataLen;
         uiFirstChunkSent = 0;
       }
+    }
+    // Ensure any pending write data is completely written
+    if (0 == tcdrain(mchar_fd))
+    {
+#ifdef DEBUG_PRINT
+      PRINT("\n\t tcdrain succeeded\n");
+#endif
+    }
+    else
+    {
+#ifdef DEBUG_PRINT
+      PRINT("\n\t tcdrain failed with errno = %d\n", errno);
+#endif
     }
     if(!ucCmd5Sent && uiFirstChunkSent == 1)
     {
@@ -932,6 +959,20 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
         fw_upload_SendIntBytes(ulOffsettoSend);
       }
       PRINT("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
+
+      // Ensure any pending write data is completely written
+      if (0 == tcdrain(mchar_fd))
+      {
+#ifdef DEBUG_PRINT
+        PRINT("\n\t tcdrain succeeded\n");
+#endif
+      }
+      else
+      {
+#ifdef DEBUG_PRINT
+        PRINT("\n\t FW download tcdrain failed with errno = %d\n", errno);
+#endif
+      }
     }
 
     if(!ucHelperOn)
@@ -989,7 +1030,7 @@ BOOLEAN bt_vnd_mrvl_check_fw_status_v2() {
   }
 
   // Wait to Receive 0xa5, 0xaa, 0xa6
-  bRetVal = fw_upload_WaitForHeaderSignature(4000);
+  bRetVal = fw_upload_WaitForHeaderSignature(200);
 
   printf("fw_upload_WaitForHeaderSignature return %d", bRetVal);
 

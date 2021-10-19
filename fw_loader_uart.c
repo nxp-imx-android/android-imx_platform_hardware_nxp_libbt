@@ -26,6 +26,9 @@
 #include <stdlib.h>
 #include <sys/select.h>
 
+#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
+#include "nxp_soc_conf.h"
+#endif
 
 #define LOG_TAG "fw_loader"
 #include <log/log.h>
@@ -104,7 +107,6 @@ static BOOLEAN cmd7_Req = FALSE;
 static BOOLEAN EntryPoint_Req = FALSE;
 static uint32 change_baudrata_buffer_len = 0;
 static uint32 cmd7_change_timeout_len = 0;
-
 
 // CMD5 Header to change bootload baud rate
 uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -373,9 +375,12 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
   } else {
       if (uiMs) {
         currTime = fw_upload_GetTime();
-        if (currTime - startTime > uiMs) {
+        if ((currTime - startTime) > uiMs) {
 #ifdef DEBUG_PRINT
-          PRINT("WaitForHeaderSignature time out");
+          PRINT(
+              "\n fw_upload_WaitForHeaderSignature Timeout, Header Received: "
+              "0x%x, timeout %d, elapsed time %llu",
+              ucRcvdHeader, uiMs, (currTime - startTime));
 #endif
           bResult = FALSE;
           break;
@@ -416,6 +421,9 @@ static uint16 fw_upload_WaitFor_Len(FILE *pFile) {
   // i.e 0xffff.
   uint16 uiXorOfLen = 0xFFFF;
 
+  while (fw_upload_GetBufferSize(mchar_fd) < 4){
+    usleep(1000);
+  };
   // Read the Lengths.
   fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiLen, 2);
   fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiLenComp, 2);
@@ -912,8 +920,9 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr) {
       fw_upload_DelayInMs(1);
     }
   }
-  while (!fw_upload_GetBufferSize(mchar_fd))
-    ;
+  while (fw_upload_GetBufferSize(mchar_fd) < 4){
+    usleep(1000);
+  };
   for (i = 0; i < 4; i++) {
     ucRcvdHeader = fw_upload_ComReadChar(mchar_fd);
     ucStr[ucStringCnt++] = ucRcvdHeader;
@@ -1033,7 +1042,6 @@ static void fw_upload_GetLast5Bytes(uint8 *buf) {
  * Notes:
  *   None.
  *
-
 *****************************************************************************/
 static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiHighBaudrate) {
   uint16 uiBytesToSend = HDR_LEN, uiFirstChunkSent = 0;
@@ -1214,7 +1222,9 @@ static uint16 fw_upload_V1SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend) 
 #endif
   // start to send Temp buffer
   uiLen = fw_upload_SendBuffer(uiLenToSend, ucByteBuffer, FALSE);
+#ifdef DEBUG_PRINT
   PRINT("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
+#endif
 
   return uiLen;
 }
@@ -1511,7 +1521,7 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
     if (ucLoadPayload != 0 || uiReUsedInitBaudrate) {
       waitHeaderSigTime = TIMEOUT_VAL_MILLISEC;
     } else {
-      waitHeaderSigTime = 0;
+      waitHeaderSigTime = 2000;
     }
     // Wait to Receive 0xa5, 0xaa, 0xab, 0xa7
     // If the second baudrate is used, wait for 2s to check 0xa5
@@ -1666,6 +1676,66 @@ static int32 fw_Change_Timeout()
 
 /******************************************************************************
  *
+ * Function:      bt_send_cmd5_data
+ *
+ * Description:   Sends CMD5 Data
+ *
+ * Arguments:
+ *   cmd5_data:   Buffer containing CMD5 Header and its Payload
+ *
+ *   read_sig_hdr_after_cmd5: Read the Signature Header after sending CMD5 over
+ *                            UART
+ *
+ * Return Value:
+ *    0 incase of success.
+ *   -1 if CMD5 is not sent
+ *   -2 if read_sig_hdr_after_cmd5 fails
+ *****************************************************************************/
+int bt_send_cmd5_data(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
+  int8 ret_value = -1;
+  int8 retry = 3;
+  uint16 uiLenToSend = 0;
+  if (uiProVer == Ver1) {
+    while (retry--) {
+      uiLenToSend = fw_upload_WaitFor_Len(NULL);
+      if (uiLenToSend != HDR_LEN) {
+        PRINT("Unexpected Header Length Received: %d", uiLenToSend);
+        /* If expected header length is invalid, check after signature header */
+        if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
+          PRINT("Heder Signature Timeout CMD5 not Sent");
+          return ret_value;
+        }
+        if (retry == 0) {
+          return ret_value;
+        }
+      } else {
+        PRINT("CMD5 bootloader length check completed");
+        break;
+      }
+    }
+
+    if (fw_upload_SendBuffer(HDR_LEN, cmd5_data, TRUE) == 0) {
+      PRINT("CMD5 sent succesfully");
+      ret_value = 0;
+      if (read_sig_hdr_after_cmd5) {
+        if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
+          PRINT("Wait for signature failed after sending CMD5");
+          ret_value = -2;
+        } else {
+          PRINT("CMD5 signature check completed after cmd5");
+        }
+      }
+    } else {
+      PRINT("Error while sending CMD5 Data");
+    }
+  } else {
+    PRINT("Unsupported Protocol version");
+  }
+  return ret_value;
+}
+
+/******************************************************************************
+ *
  * Name: fw_upload_FW
  *
  * Description:
@@ -1697,7 +1767,11 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   int32 result = 0;
   uint16 uiLenToSend = 0;
   BOOLEAN bFirstWaitHeaderSignature = TRUE;
-
+  BOOLEAN check_sig_hdr = TRUE;
+#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
+  /*IR CMD5 needs to be sent before Helper and Firmware only once*/
+  static BOOLEAN send_ir_cmd5 = TRUE;
+#endif
   // Open File for reading.
   pFile = fopen(pFileName, "rb");
 
@@ -1710,6 +1784,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
 
   if(result == -1)
   {
+    fclose(pFile);
     return START_INDICATION_NOT_FOUND;
   }
 
@@ -1738,20 +1813,36 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
         break;
     }
     if (result != 0) {
+      fclose(pFile);
       return CHANGE_BAUDRATE_FAIL;
     }
   }
 
+#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
+  PRINT("IR config CMD5 enable_ir_config=%d send_ir_cmd5=%d", enable_ir_config,
+        send_ir_cmd5);
+  if ((enable_ir_config == 1) && (send_ir_cmd5 == TRUE)) {
+    if (bt_send_cmd5_data(cmd5_ir_config, TRUE) == 0) {
+      check_sig_hdr = FALSE;
+      PRINT("\n ========== Download Complete IR CONFIG=========\n\n");
+    } else {
+      PRINT("Sending IR config CMD5 FAILED");
+    }
+    send_ir_cmd5 = FALSE;
+  }
+#endif
   // Calculate the size of the file to be downloaded.
   result = fseek(pFile, 0, SEEK_END);
   if (result != 0) {
     PRINT("\nfseek failed\n");
+    fclose(pFile);
     return FEEK_SEEK_ERROR;
   }
 
   ulTotalFileSize = (long)ftell(pFile);
   if (ulTotalFileSize <= 0) {
     PRINT("\nError:Download Size is 0\n");
+    fclose(pFile);
     return FILESIZE_IS_ZERO;
   }
 
@@ -1759,6 +1850,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   if(pFileBuffer == NULL)
   {
     PRINT("malloc() returned NULL while allocating size for file");
+    fclose(pFile);
     return MALLOC_RETURNED_NULL;
   }
 
@@ -1766,6 +1858,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   if (result != 0) {
     PRINT("\nfseek() failed");
     free(pFileBuffer);
+    fclose(pFile);
     return FEEK_SEEK_ERROR;
   }
 
@@ -1774,6 +1867,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     if (ulReadLen != ulTotalFileSize) {
       PRINT("\nError:Read File Fail\n");
       free(pFileBuffer);
+      fclose(pFile);
       return READ_FILE_FAIL;
     }
   }
@@ -1788,9 +1882,12 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
 
   while (!bRetVal) {
     // Wait to Receive 0xa5, 0xaa, 0xab, 0xa7
-    if (!iSecondBaudRate && !fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC)) {
-      PRINT("\n0xa5,0xaa,0xab or 0xa7 is not received in %d ms\n", TIMEOUT_VAL_MILLISEC);
+    if (check_sig_hdr && (!iSecondBaudRate) &&
+        (!fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC))) {
+      PRINT("\n0xa5,0xaa,0xab or 0xa7 is not received in %d ms\n",
+            TIMEOUT_VAL_MILLISEC);
       free(pFileBuffer);
+      fclose(pFile);
       return HEADER_SIGNATURE_TIMEOUT;
     }
     iSecondBaudRate = 0;
@@ -1798,9 +1895,11 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     if (uiProVer == Ver1) {
       // Read the 'Length' bytes requested by Helper
       uiLenToSend = fw_upload_WaitFor_Len(pFile);
+      PRINT("Number of bytes to be downloaded: %8ld\r",ulTotalFileSize);
       do {
         uiLenToSend = fw_upload_V1SendLenBytes(pFileBuffer, uiLenToSend);
       } while (uiLenToSend != 0);
+      PRINT("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
       // If the Length requested is 0, download is complete.
       if (uiLenToSend == 0) {
         bRetVal = TRUE;
@@ -1871,6 +1970,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     free(pFileBuffer);
     pFileBuffer = NULL;
   }
+  fclose(pFile);
   return DOWNLOAD_SUCCESS;
 }
 
@@ -1939,9 +2039,9 @@ BOOLEAN bt_vnd_mrvl_check_fw_status() {
 *
 *****************************************************************************/
 int bt_vnd_mrvl_download_fw(int8 *pPortName, int32 iBaudrate, int8 *pFileName, int32 iSecondBaudrate) {
-  double endTime;
-  double start;
-  double cost;
+  uint64 endTime;
+  uint64 start;
+  uint64 cost;
   uint32 ulResult;
 
   start = fw_upload_GetTime();
@@ -1957,7 +2057,7 @@ int bt_vnd_mrvl_download_fw(int8 *pPortName, int32 iBaudrate, int8 *pFileName, i
   if (ulResult == 0) {
     printf("\nDownload Complete\n");
     cost = fw_upload_GetTime() - start;
-    printf("time:%f\n", cost);
+    printf("time:%llu\n", cost);
     if (uiProVer == Ver1) {
       fw_upload_DelayInMs(MAX_CTS_TIMEOUT);
       endTime = fw_upload_GetTime() + MAX_CTS_TIMEOUT;

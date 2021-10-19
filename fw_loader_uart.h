@@ -34,7 +34,7 @@ typedef struct {
 
 extern int mchar_fd;
 extern int uart_break_before_change_baudrate;
-
+extern int enable_ir_config;
 
 /*===================== Global Vars ==============================================*/
 

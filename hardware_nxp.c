@@ -18,14 +18,14 @@
 
 #define LOG_TAG "hardware_nxp"
 
-#include <log/log.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <assert.h>
+#include <log/log.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "bt_vendor_nxp.h"
 #include "bt_hci_bdroid.h"
+#include "bt_vendor_nxp.h"
 
 /******************************************************************************
 **  Constants & Macros
@@ -86,6 +86,14 @@
 #define BD_ADDR_LEN 6
 #define HCI_CMD_NXP_LOAD_CONFIG_DATA 0xFC61
 #define HCI_CMD_NXP_LOAD_CONFIG_DATA_SIZE 32
+#define HCI_CMD_NXP_CUSTOM_OPCODE 0xFD60
+#define HCI_CMD_NXP_SUB_ID_BLE_TX_POWER 0x01
+#define HCI_CMD_NXP_BLE_TX_POWER_DATA_SIZE 0x03
+#define HCI_CMD_NXP_BT_TX_POWER_DATA_SIZE 0x01
+#define HCI_CMD_NXP_READ_FW_REVISION 0xFC0F
+#define HCI_CMD_NXP_WRITE_BT_TX_POWER 0xFCEE
+#define HCI_CMD_NXP_INDEPENDENT_RESET_SETTING 0xFC0D
+#define HCI_CMD_NXP_INDEPENDENT_RESET_SETTING_SIZE 0x02
 #define BT_CONFIG_DATA_SIZE 28
 #define STREAM_TO_UINT16(u16, p)                                \
   do {                                                          \
@@ -121,11 +129,21 @@ struct bt_evt_param_t {
 static void hw_sco_config(void);
 #endif
 static void hw_config_set_bdaddr(void);
+static void hw_bt_read_fw_revision(void);
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+static void hw_bt_enable_independent_reset(void);
+#endif
 #if (USE_CONTROLLER_BDADDR == TRUE)
 static void hw_config_read_bdaddr(void);
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
 static int hw_bt_cal_data_load(void);
+#endif
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+static void hw_ble_set_power_level(void);
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+static void hw_bt_enable_max_power_level_cmd(void);
 #endif
 /***********************************************************
  *  Local variables
@@ -384,17 +402,19 @@ inline static void bt_update_bdaddr(void) {
 **
 *******************************************************************************/
 static void hw_config_callback(void* packet) {
-  uint8_t* stream, event, event_code, status, opcode_offset;
-  uint16_t opcode;
+  uint8_t *stream, event, event_code, status, opcode_offset;
+  uint16_t opcode, len;
 #if (USE_CONTROLLER_BDADDR == TRUE)
   char* p_tmp;
   HC_BT_HDR* p_evt_buf = (HC_BT_HDR*)packet;
 #endif
   stream = ((HC_BT_HDR*)packet)->data;
   event = ((HC_BT_HDR*)packet)->event;
-  opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1;  // Skip num packets.
-
-  if (event == HCI_PACKET_TYPE_EVENT) {
+  len = ((HC_BT_HDR*)packet)->len;
+  opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1; /*Skip num packets.*/
+  VNDDBG("Packet length %d", len);
+  /*Minimum length of commad event should be 6 bytes*/
+  if ((event == HCI_PACKET_TYPE_EVENT) && (len >= 6)) {
     event_code = stream[0];
     opcode = stream[opcode_offset] | (stream[opcode_offset + 1] << 8);
     if (event_code == HCI_COMMAND_COMPLETE_EVT) {
@@ -403,12 +423,58 @@ static void hw_config_callback(void* packet) {
       switch (opcode) {
         case OpCodePack(HCI_CONTROLLER_CMD_OGF, HCI_RESET_OCF): {
           VNDDBG("Receive hci reset complete event");
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+          hw_bt_enable_independent_reset();
+#else
+          hw_bt_read_fw_revision();
+#endif
+          break;
+        }
+        case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING: {
+          VNDDBG("Independent reset command completed");
+          hw_bt_read_fw_revision();
+          break;
+        }
+        case HCI_CMD_NXP_READ_FW_REVISION: {
+          VNDDBG("%s Read FW version reply recieved", __func__);
+          if ((status == 0) && (len == 14)) {
+            ALOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7], stream[6],
+                  stream[9]);
+            ALOGI("ROM version: %02X %02X %02X %02X", stream[10], stream[11],
+                  stream[12], stream[13]);
+          } else {
+            ALOGI("%s Error while reading FW version", __func__);
+          }
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
           if (hw_bt_cal_data_load()) {
-            bt_update_bdaddr();
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+            if (set_1m_2m_power) {
+              hw_ble_set_power_level();
+            } else
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+                if (bt_set_max_power) {
+              hw_bt_enable_max_power_level_cmd();
+            } else
+#endif
+            {
+              bt_update_bdaddr();
+            }
           }
 #else
-          bt_update_bdaddr();
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+          if (set_1m_2m_power) {
+            hw_ble_set_power_level();
+          } else
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+              if (bt_set_max_power) {
+            hw_bt_enable_max_power_level_cmd();
+          } else
+#endif
+          {
+            bt_update_bdaddr();
+          }
 #endif
           break;
         }
@@ -425,10 +491,60 @@ static void hw_config_callback(void* packet) {
 #endif
           break;
         }
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+        case HCI_CMD_NXP_CUSTOM_OPCODE: {
+          VNDDBG("Receive HCI_CMD_NXP_CUSTOM_OPCODE complete event.\n");
+          /*Minimum length in case of HCI_CMD_NXP_CUSTOM_OPCODE should be 7
+           * bytes*/
+          if (len >= 7) {
+            VNDDBG("Subid: %02x", stream[opcode_offset + 3]);
+            switch (stream[opcode_offset + 3]) {
+              case HCI_CMD_NXP_SUB_ID_BLE_TX_POWER: {
+                if (set_1m_2m_power) {
+                  hw_ble_set_power_level();
+                } else
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+                    if (bt_set_max_power) {
+                  hw_bt_enable_max_power_level_cmd();
+                } else
+#endif
+                {
+                  bt_update_bdaddr();
+                }
+              } break;
+              default:
+                ALOGE("Received event for unexpected subid");
+                break;
+            }
+          } else {
+            ALOGE("Subid not received");
+          }
+          break;
+        }
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+        case HCI_CMD_NXP_WRITE_BT_TX_POWER: {
+          VNDDBG("Receive HCI_CMD_NXP_WRITE_BT_TX_POWER complete event.\n");
+          bt_update_bdaddr();
+          break;
+        }
+#endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
         case HCI_CMD_NXP_LOAD_CONFIG_DATA: {
           VNDDBG("Receive HCI_CMD_NXP_LOAD_CONFIG_DATA complete event.\n");
-          bt_update_bdaddr();
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+          if (set_1m_2m_power) {
+            hw_ble_set_power_level();
+          } else
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+              if (bt_set_max_power) {
+            hw_bt_enable_max_power_level_cmd();
+          } else
+#endif
+          {
+            bt_update_bdaddr();
+          }
           break;
         }
 #endif
@@ -654,3 +770,140 @@ done:
   return ret;
 }
 #endif
+
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+/******************************************************************************
+ **
+ ** Function:      hw_ble_send_power_level_cmd
+ **
+ ** Description:   Send BLE TX power level command.
+ **
+ ** Return Value: NA
+ **
+ *****************************************************************************/
+static void hw_ble_send_power_level_cmd(uint8_t phy_level, int8_t power_level) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  uint8_t* stream;
+  opcode = HCI_CMD_NXP_CUSTOM_OPCODE;
+  packet = make_command(opcode, HCI_CMD_NXP_BLE_TX_POWER_DATA_SIZE);
+  if (packet) {
+    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream[0] = HCI_CMD_NXP_SUB_ID_BLE_TX_POWER;
+    stream[1] = phy_level;
+    stream[2] = power_level;
+
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      ALOGI("%s Sent BLE power for %d PHY successfully\n", __func__, phy_level);
+    }
+  } else {
+    VNDDBG("%s no valid packet \n", __func__);
+  }
+  return;
+}
+
+/******************************************************************************
+ **
+ ** Function:      hw_ble_set_power_level
+ **
+ ** Description:   Set BLE TX power level for PHY1 and PHY2.
+ **
+ ** Return Value: NA
+ **
+ *****************************************************************************/
+static void hw_ble_set_power_level(void) {
+  if (set_1m_2m_power & BLE_SET_1M_POWER) {
+    ALOGI("Setting BLE 1M TX power level at %d dbm", ble_1m_power);
+    set_1m_2m_power &= ~BLE_SET_1M_POWER;
+    hw_ble_send_power_level_cmd(1, ble_1m_power);
+  } else if (set_1m_2m_power & BLE_SET_2M_POWER) {
+    ALOGI("Setting BLE 2M TX power level at %d dbm", ble_2m_power);
+    set_1m_2m_power &= ~BLE_SET_2M_POWER;
+    hw_ble_send_power_level_cmd(2, ble_2m_power);
+  }
+}
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+/******************************************************************************
+ **
+ ** Function:      hw_bt_enable_max_power_level_cmd
+ **
+ ** Description:   Send BT TX power level command.
+ **
+ ** Return Value: NA
+ **
+ *****************************************************************************/
+static void hw_bt_enable_max_power_level_cmd(void) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  uint8_t* stream;
+  opcode = HCI_CMD_NXP_WRITE_BT_TX_POWER;
+  packet = make_command(opcode, HCI_CMD_NXP_BT_TX_POWER_DATA_SIZE);
+  if (packet) {
+    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream[0] = bt_max_power_sel;
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      ALOGI("%s Sent Max BT power successfully with %d parameter\n", __func__,
+            bt_max_power_sel);
+    }
+  } else {
+    VNDDBG("%s no valid packet \n", __func__);
+  }
+  return;
+}
+
+#endif
+
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+/******************************************************************************
+ **
+ ** Function:      hw_bt_enable_independent_reset
+ **
+ ** Description:   Sends command to enable out band independent reset
+ **
+ ** Return Value:  NA
+ **
+ *****************************************************************************/
+static void hw_bt_enable_independent_reset(void) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  uint8_t* stream;
+  opcode = HCI_CMD_NXP_INDEPENDENT_RESET_SETTING;
+  packet = make_command(opcode, HCI_CMD_NXP_INDEPENDENT_RESET_SETTING_SIZE);
+  if (packet) {
+    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream[0] = 0x01;
+    stream[1] = independent_reset_gpio_pin;
+
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      ALOGI("%s Enable Independent Reset command sent\n", __func__);
+    }
+  } else {
+    VNDDBG("%s no valid packet \n", __func__);
+  }
+  return;
+}
+#endif
+/******************************************************************************
+ **
+ ** Function:      hw_bt_read_fw_revision
+ **
+ ** Description:   Sends command to read revision
+ **
+ ** Return Value:  NA
+ **
+ *****************************************************************************/
+void hw_bt_read_fw_revision(void) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  opcode = HCI_CMD_NXP_READ_FW_REVISION;
+  packet = make_command(opcode, 0);
+  if (packet) {
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      ALOGI("%s Read FW revision command sent\n", __func__);
+    }
+  } else {
+    VNDDBG("%s no valid packet \n", __func__);
+  }
+  return;
+}

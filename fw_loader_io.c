@@ -20,8 +20,9 @@
 #include "fw_loader_io.h"
 
 #define LOG_TAG "fw_loader_linux"
-#include <log/log.h>
 #include <cutils/properties.h>
+#include <errno.h>
+#include <log/log.h>
 #define perror(fmt, ...) ALOGE("ERROR : %s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 
 /*===================== Macros ===================================================*/
@@ -328,18 +329,23 @@ int32 fw_upload_GetBufferSize(int32 mchar_fd) {
  * Arguments:
  *
  * Return Value:
- *   return the current time
+ *   return the current time in milliseconds
  *
  * Notes:
  *   None.
  *
  *****************************************************************************/
 
-double fw_upload_GetTime(void) {
-  struct timeval time;
-  double millsectime;
-  gettimeofday(&time, NULL);
-  millsectime = (time.tv_sec * 1000000 + time.tv_usec) / 1000;
+uint64 fw_upload_GetTime(void) {
+  struct timespec time;
+  clockid_t clk_id;
+  uint64 millsectime = -1;
+
+  clk_id = CLOCK_MONOTONIC;
+  if (!clock_gettime(clk_id, &time)) {
+    millsectime = (time.tv_sec * 1000) + (time.tv_nsec / 1000000);
+  } else {
+    ALOGE("\n clock_gettime error: %d", errno);
+  }
   return millsectime;
 }
-

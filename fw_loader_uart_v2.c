@@ -1063,9 +1063,9 @@ BOOLEAN bt_vnd_mrvl_check_fw_status_v2() {
 *
 *****************************************************************************/
 int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName) {
-  double endTime;
-  double start;
-  double cost;
+  uint64 endTime;
+  uint64 start;
+  uint64 cost;
   uint32 ulResult;
   uint8 ucByte;
 
@@ -1084,7 +1084,7 @@ int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName
     {
       printf("\nDownload Complete\n");
       cost = fw_upload_GetTime() - start;
-      printf("time:%f\n", cost);
+      printf("time:%llu\n", cost);
       if(ucHelperOn == TRUE)
       {
         endTime = fw_upload_GetTime() + POLL_AA_TIMEOUT;

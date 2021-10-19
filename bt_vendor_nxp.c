@@ -24,13 +24,12 @@
  *  Description:   NXP vendor specific library implementation
  *
  ******************************************************************************/
-
 #define LOG_TAG "bt-vnd-nxp"
-
 #include <ctype.h>
-#include <errno.h>
+#include <cutils/properties.h>
 #include <errno.h>
 #include <grp.h>
+#include <log/log.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <sched.h>
@@ -42,16 +41,14 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <log/log.h>
-#include <cutils/properties.h>
-#include "bt_vendor_nxp.h"
-
 #ifdef FW_LOADER_V2
 #include "fw_loader_uart_v2.h"
 #else
 #include "fw_loader_uart.h"
 #endif
 
+#include <linux/gpio.h>
+#include "bt_vendor_nxp.h"
 /******************************************************************************
  **
  ** Constants and Macro's
@@ -59,6 +56,7 @@
  ******************************************************************************/
 /*[NK] @NXP - Driver FIX
   ioctl command to release the read thread before driver close */
+
 #define MBTCHAR_IOCTL_RELEASE _IO('M', 1)
 
 #define PROP_BLUETOOTH_OPENED "bluetooth.nxp.uart_configured"
@@ -96,7 +94,22 @@ static int uart_break_before_open = 0;
 static int32_t baudrate_fw_init = 115200;
 static int32_t baudrate_bt = 3000000;
 int write_bdaddrss = 0;
-
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+int8_t ble_1m_power = 0;
+int8_t ble_2m_power = 0;
+uint8_t set_1m_2m_power = 0;
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+int8_t bt_max_power_sel = 0;
+uint8_t bt_set_max_power = 0;
+#endif
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+uint8_t independent_reset_gpio_pin = 0xFF;
+#endif
+#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
+uint8_t ir_host_gpio_pin = 14;
+static char chrdev_name[32] = "/dev/gpiochip5";
+#endif
 uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0xFE, /* Parameter ID */
     0x06, /* bd_addr length */
@@ -112,19 +125,25 @@ uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
 int uart_break_before_change_baudrate = 0;
 static int enable_download_fw = 0;
 static int uart_break_after_dl_helper = 0;
-static int uart_sleep_after_dl = 700;
+static int uart_sleep_after_dl = 100;
 static int download_helper = 0;
 static int32_t baudrate_dl_helper = 115200;
 static int32_t baudrate_dl_image = 3000000;
 static char pFileName_helper[512] = "/vendor/firmware/helper_uart_3000000.bin";
 static char pFileName_image[512] = "/vendor/firmware/uart8997_bt_v4.bin";
 static int32_t iSecondBaudrate = 0;
+#if (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE)
+int enable_ir_config = 0;
+#endif
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
 char pFilename_cal_data[512];
 #endif
 static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
-
+#if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
+static int rfkill_id = -1;
+static char* rfkill_state_path = NULL;
+#endif
 /*****************************************************************************
 **
 **   HELPER FUNCTIONS
@@ -183,7 +202,58 @@ static int set_baudrate_fw_init(char* p_conf_name, char* p_conf_value,
   baudrate_fw_init = atoi(p_conf_value);
   return 0;
 }
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+static int set_ble_1m_power(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  ble_1m_power = atoi(p_conf_value);
+  set_1m_2m_power |= BLE_SET_1M_POWER;
+  return 0;
+}
 
+static int set_ble_2m_power(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  ble_2m_power = atoi(p_conf_value);
+  set_1m_2m_power |= BLE_SET_2M_POWER;
+  return 0;
+}
+#endif
+
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+static int set_bt_tx_power(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  bt_max_power_sel = atoi(p_conf_value);
+  bt_set_max_power = 1;
+  return 0;
+}
+#endif
+
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+static int set_independent_reset_gpio_pin(char* p_conf_name, char* p_conf_value,
+                                          int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  independent_reset_gpio_pin = atoi(p_conf_value);
+  return 0;
+}
+#endif
+#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
+static int set_oob_ir_host_gpio_pin(char* p_conf_name, char* p_conf_value,
+                                    int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  ir_host_gpio_pin = atoi(p_conf_value);
+  return 0;
+}
+static int set_charddev_name(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  strcpy(chrdev_name, p_conf_value);
+  return 0;
+}
+#endif
 static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
                               int param) {
   UNUSED(p_conf_name);
@@ -284,6 +354,23 @@ static int set_iSecondBaudrate(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 
+static int set_uart_sleep_after_dl(char* p_conf_name, char* p_conf_value,
+                                   int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  uart_sleep_after_dl = atoi(p_conf_value);
+  return 0;
+}
+
+#if (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE)
+static int set_independent_reset_config(char* p_conf_name, char* p_conf_value,
+                                        int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  enable_ir_config = atoi(p_conf_value);
+  return 0;
+}
+#endif
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
 static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
@@ -306,6 +393,20 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_bt", set_baudrate_bt, 0},
     {"baudrate_fw_init", set_baudrate_fw_init, 0},
     {"bd_address", set_bd_address_buf, 0},
+#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
+    {"ble_1m_power", set_ble_1m_power, 0},
+    {"ble_2m_power", set_ble_2m_power, 0},
+#endif
+#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
+    {"bt_max_power_sel", set_bt_tx_power, 0},
+#endif
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+    {"independent_reset_gpio_pin", set_independent_reset_gpio_pin, 0},
+#endif
+#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
+    {"oob_ir_host_gpio_pin", set_oob_ir_host_gpio_pin, 0},
+    {"chardev_name", set_charddev_name, 0},
+#endif
 #ifdef UART_DOWNLOAD_FW
     {"enable_download_fw", set_enable_download_fw, 0},
     {"uart_break_before_change_baudrate", set_uart_break_before_change_baudrate,
@@ -316,6 +417,10 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_dl_helper", set_baudrate_dl_helper, 0},
     {"baudrate_dl_image", set_baudrate_dl_image, 0},
     {"iSecondBaudrate", set_iSecondBaudrate, 0},
+    {"uart_sleep_after_dl", set_uart_sleep_after_dl, 0},
+#if (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE)
+    {"enable_ir_config", set_independent_reset_config, 0},
+#endif
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
     {"pFilename_cal_data", set_Filename_cal_data, 0},
@@ -640,7 +745,6 @@ static int uart_init_open(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
 
   return fd;
 }
-
 #ifdef UART_DOWNLOAD_FW
 /*******************************************************************************
 **
@@ -791,6 +895,7 @@ static int config_uart() {
         return -1;
       }
     }
+    usleep(60000); /* Sleep to allow baud rate setting to happen in FW */
 
     VNDDBG("start read hci event\n");
     memset(resp, 0x00, 10);
@@ -800,6 +905,7 @@ static int config_uart() {
       return -1;
     }
     VNDDBG("over send bt chip baudrate\n");
+
     /* set host uart speed according to baudrate_bt */
     VNDDBG("start set host baud rate as baudrate_bt\n");
     tcflush(mchar_fd, TCIOFLUSH);
@@ -813,7 +919,6 @@ static int config_uart() {
       return -1;
     }
     tcflush(mchar_fd, TCIOFLUSH);
-
   } else {
     /* set host uart speed according to baudrate_bt */
     VNDDBG("start set host baud rate as baudrate_bt\n");
@@ -830,6 +935,152 @@ static int config_uart() {
   set_prop_int32(PROP_BLUETOOTH_OPENED, 1);
   return 0;
 }
+#if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
+
+static bool bt_vnd_is_rfkill_disabled(void) {
+  char value[PROPERTY_VALUE_MAX];
+
+  property_get("ro.rfkilldisabled", value, "0");
+  if (strcmp(value, "1") == 0) {
+    return true;
+  }
+  return false;
+}
+
+static int bt_vnd_init_rfkill() {
+  char path[64];
+  char buf[16];
+  int fd, sz, id;
+  sz = -1;  // initial
+  if (bt_vnd_is_rfkill_disabled()) {
+    return -1;
+  }
+
+  for (id = 0;; id++) {
+    snprintf(path, sizeof(path), "/sys/class/rfkill/rfkill%d/type", id);
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+      ALOGE("open(%s) failed: %s (%d)\n", path, strerror(errno), errno);
+      break;
+    }
+    sz = read(fd, &buf, sizeof(buf));
+    if (sz < 0) {
+      ALOGE("read failed: %s (%d)\n", strerror(errno), errno);
+    }
+    close(fd);
+    if (sz >= 9 && memcmp(buf, "bluetooth", 9) == 0) {
+      rfkill_id = id;
+      break;
+    }
+  }
+
+  if (rfkill_id == -1) {
+    ALOGE("bluetooth rfkill not found\n");
+    return -1;
+  } else {
+    asprintf(&rfkill_state_path, "/sys/class/rfkill/rfkill%d/state", rfkill_id);
+    VNDDBG("rfkill_state_path set to %s \n", rfkill_state_path);
+    return 0;
+  }
+}
+
+int bt_vnd_set_bluetooth_power(BOOLEAN bt_turn_on) {
+  int sz;
+  int fd = -1;
+  int ret = -1;
+  char buffer = bt_turn_on ? '1' : '0';
+  /* check if we have rfkill interface */
+  if (bt_vnd_is_rfkill_disabled()) {
+    VNDDBG("rfkill disabled, ignoring bluetooth power %s\n",
+           bt_turn_on ? "ON" : "OFF");
+    ret = 0;
+    goto done;
+  }
+
+  if (rfkill_id == -1) {
+    if (bt_vnd_init_rfkill()) {
+      goto done;
+    }
+  }
+
+  fd = open(rfkill_state_path, O_WRONLY);
+  if (fd < 0) {
+    ALOGE("open(%s) for write failed: %s (%d)", rfkill_state_path,
+          strerror(errno), errno);
+    goto done;
+  }
+  sz = write(fd, &buffer, 1);
+  if (sz < 0) {
+    ALOGE("write(%s) failed: %s (%d)", rfkill_state_path, strerror(errno),
+          errno);
+  }
+  ret = 0;
+
+done:
+  if (fd >= 0) {
+    close(fd);
+  }
+  return ret;
+}
+#endif /*NXP_ENABLE_RFKILL_SUPPORT*/
+
+#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
+void bt_vnd_gpio_configuration(int value) {
+  struct gpiohandle_request req;
+  struct gpiohandle_data data;
+  int fd, ret;
+
+  /* Open device: gpiochip0 for GPIO bank A */
+  fd = open(chrdev_name, 0);
+  if (fd == -1) {
+    ALOGE("Failed to open %s %s\n", chrdev_name, strerror(errno));
+    return;
+  }
+  /* Request GPIO Direction line as out */
+  req.lineoffsets[0] = ir_host_gpio_pin;
+  req.flags = GPIOHANDLE_REQUEST_OUTPUT;
+  memcpy(req.default_values, &data, sizeof(req.default_values));
+  req.lines = 1;
+  ret = ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req);
+
+  if (ret == -1) {
+    ALOGE("%s Failed to issue GET LINEHANDLE IOCTL(%d)", strerror(errno), ret);
+    close(fd);
+    return;
+  }
+  if (close(fd) == -1) {
+    ALOGE("Failed to close GPIO character device file");
+    return;
+  }
+  /* Get the value of line */
+  memset(&data, 0, sizeof(data));
+  ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
+  if (ret == -1) {
+    close(req.fd);
+    ALOGE("%s failed to issue GET LINEHANDLE", strerror(errno));
+    return;
+  }
+  VNDDBG("Current Value of line=: %d\n", data.values[0]);
+
+  /* Set the requested value to the line*/
+  data.values[0] = value;
+  ret = ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data);
+  if (ret == -1) {
+    close(req.fd);
+    ALOGE("%s failed to issue SET LINEHANDLE", strerror(errno));
+    return;
+  }
+  ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
+  VNDDBG("Updated Value of Line:= %d\n", data.values[0]);
+
+  /*  release line */
+  ret = close(req.fd);
+  if (ret == -1) {
+    ALOGE("%s Failed to close GPIO LINEHANDLE device file", strerror(errno));
+    return;
+  }
+}
+#endif /*NXP_IR_IMX_GPIO_TOGGLE*/
 
 /*****************************************************************************
 **
@@ -876,6 +1127,24 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       } else if (*state == BT_VND_PWR_ON) {
         VNDDBG("power on --------------------------------------\n");
         adapterState = BT_VND_PWR_ON;
+#if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
+        bt_vnd_set_bluetooth_power(FALSE);
+        usleep(5000);
+        bt_vnd_set_bluetooth_power(TRUE);
+
+        set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
+        set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
+#endif
+#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
+        set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
+        set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
+
+        VNDDBG("-------------- Setting GPIO LOW -----------------\n");
+        bt_vnd_gpio_configuration(FALSE);
+        usleep(1000);
+        VNDDBG("---------------- Setting GPIO HIGH ----------------\n");
+        bt_vnd_gpio_configuration(TRUE);
+#endif
       }
     } break;
     case BT_VND_OP_FW_CFG:

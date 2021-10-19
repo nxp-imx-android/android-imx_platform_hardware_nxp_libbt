@@ -45,7 +45,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "008.004"
+#define BT_HAL_VERSION "008.013"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -70,6 +70,9 @@ typedef unsigned char BOOLEAN;
 #define MALLOC_RETURNED_NULL 0xB
 #define START_INDICATION_NOT_FOUND 0xC
 
+#define BLE_SET_1M_POWER 0x01
+#define BLE_SET_2M_POWER 0x02
+
 /* Run-time configuration file */
 #ifndef VENDOR_LIB_CONF_FILE
 #define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"
@@ -77,6 +80,30 @@ typedef unsigned char BOOLEAN;
 
 #ifndef NXP_LOAD_BT_CALIBRATION_DATA
 #define NXP_LOAD_BT_CALIBRATION_DATA FALSE
+#endif
+
+#ifndef NXP_SET_BLE_TX_POWER_LEVEL
+#define NXP_SET_BLE_TX_POWER_LEVEL FALSE
+#endif
+
+#ifndef NXP_ENABLE_BT_TX_MAX_POWER
+#define NXP_ENABLE_BT_TX_MAX_POWER FALSE
+#endif
+
+#ifndef NXP_ENABLE_INDEPENDENT_RESET_VSC
+#define NXP_ENABLE_INDEPENDENT_RESET_VSC FALSE
+#endif
+
+#ifndef NXP_ENABLE_INDEPENDENT_RESET_CMD5
+#define NXP_ENABLE_INDEPENDENT_RESET_CMD5 FALSE
+#endif
+
+#ifndef NXP_IR_IMX_GPIO_TOGGLE
+#define NXP_IR_IMX_GPIO_TOGGLE FALSE
+#endif
+
+#ifndef NXP_ENABLE_RFKILL_SUPPORT
+#define NXP_ENABLE_RFKILL_SUPPORT FALSE
 #endif
 
 #ifndef NXP_VND_DBG
@@ -99,7 +126,12 @@ extern int write_bdaddrss;
 extern uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE];
 extern const bt_vendor_callbacks_t* vnd_cb;
 extern char pFilename_cal_data[];
-
+extern int8_t ble_1m_power;
+extern int8_t ble_2m_power;
+extern int8_t bt_max_power_sel;
+extern uint8_t set_1m_2m_power;
+extern uint8_t bt_set_max_power;
+extern uint8_t independent_reset_gpio_pin;
 /*****************************************************************************
 **   Functions Prototype
 *****************************************************************************/

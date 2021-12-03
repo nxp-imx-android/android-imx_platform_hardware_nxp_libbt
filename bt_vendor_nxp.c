@@ -77,6 +77,23 @@
 #define UNUSED(x) (void)(x)
 #define BD_ADDR_LEN 6
 
+struct soc_info {
+  char* name;
+  int id;
+};
+struct soc_info soc_name_dict[] = {{"SOC_NONE", SOC_NONE},
+                                   {"SOC_88W8977_A2", SOC_88W8977_A2},
+                                   {"SOC_88W8987_A0", SOC_88W8987_A0},
+                                   {"SOC_88W8997_A2", SOC_88W8997_A2},
+                                   {"SOC_88W9000S_B0", SOC_88W9000S_B0},
+                                   {"SOC_88W9098_A0", SOC_88W9098_A0},
+                                   {"SOC_88W9098_A1", SOC_88W9098_A1},
+                                   {"SOC_88W9177_A0", SOC_88W9177_A0},
+                                   {"SOC_88W9177_A1", SOC_88W9177_A1},
+                                   {"SOC_IW416_A1", SOC_IW416_A1},
+                                   {"SOC_IW620_B0", SOC_IW620_B0},
+                                   {"SOC_RW610_A0", SOC_RW610_A0}};
+
 /******************************************************************************
 **  Variables
 ******************************************************************************/
@@ -110,6 +127,10 @@ uint8_t independent_reset_gpio_pin = 0xFF;
 uint8_t ir_host_gpio_pin = 14;
 static char chrdev_name[32] = "/dev/gpiochip5";
 #endif
+/* 0:disable IR(default); 1:OOB IR(FW Config); 2:Inband IR; 3:OOB IR(FW Init
+ * CMD5)*/
+uint8_t independent_reset_mode = 0;
+uint32_t target_soc = SOC_NONE;
 uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0xFE, /* Parameter ID */
     0x06, /* bd_addr length */
@@ -132,9 +153,7 @@ static int32_t baudrate_dl_image = 3000000;
 static char pFileName_helper[512] = "/vendor/firmware/helper_uart_3000000.bin";
 static char pFileName_image[512] = "/vendor/firmware/uart8997_bt_v4.bin";
 static int32_t iSecondBaudrate = 0;
-#if (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE)
-int enable_ir_config = 0;
-#endif
+
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
 char pFilename_cal_data[512];
@@ -143,6 +162,9 @@ static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
 #if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
 static int rfkill_id = -1;
 static char* rfkill_state_path = NULL;
+#endif
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+int last_baudrate = 0;
 #endif
 /*****************************************************************************
 **
@@ -229,6 +251,26 @@ static int set_bt_tx_power(char* p_conf_name, char* p_conf_value, int param) {
   return 0;
 }
 #endif
+
+static int set_target_soc(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  for (int i = 0; i < (sizeof(soc_name_dict) / sizeof(soc_name_dict[0])); i++) {
+    if (strstr(soc_name_dict[i].name, p_conf_value) != NULL) {
+      target_soc = soc_name_dict[i].id;
+      break;
+    }
+  }
+  return 0;
+}
+
+static int set_independent_reset_mode(char* p_conf_name, char* p_conf_value,
+                                      int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  independent_reset_mode = atoi(p_conf_value);
+  return 0;
+}
 
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 static int set_independent_reset_gpio_pin(char* p_conf_name, char* p_conf_value,
@@ -361,16 +403,6 @@ static int set_uart_sleep_after_dl(char* p_conf_name, char* p_conf_value,
   uart_sleep_after_dl = atoi(p_conf_value);
   return 0;
 }
-
-#if (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE)
-static int set_independent_reset_config(char* p_conf_name, char* p_conf_value,
-                                        int param) {
-  UNUSED(p_conf_name);
-  UNUSED(param);
-  enable_ir_config = atoi(p_conf_value);
-  return 0;
-}
-#endif
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
 static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
@@ -393,6 +425,7 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_bt", set_baudrate_bt, 0},
     {"baudrate_fw_init", set_baudrate_fw_init, 0},
     {"bd_address", set_bd_address_buf, 0},
+    {"target_soc", set_target_soc, 0},
 #if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
     {"ble_1m_power", set_ble_1m_power, 0},
     {"ble_2m_power", set_ble_2m_power, 0},
@@ -407,6 +440,7 @@ static const conf_entry_t conf_table[] = {
     {"oob_ir_host_gpio_pin", set_oob_ir_host_gpio_pin, 0},
     {"chardev_name", set_charddev_name, 0},
 #endif
+    {"independent_reset_mode", set_independent_reset_mode, 0},
 #ifdef UART_DOWNLOAD_FW
     {"enable_download_fw", set_enable_download_fw, 0},
     {"uart_break_before_change_baudrate", set_uart_break_before_change_baudrate,
@@ -418,9 +452,6 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_dl_image", set_baudrate_dl_image, 0},
     {"iSecondBaudrate", set_iSecondBaudrate, 0},
     {"uart_sleep_after_dl", set_uart_sleep_after_dl, 0},
-#if (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE)
-    {"enable_ir_config", set_independent_reset_config, 0},
-#endif
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
     {"pFilename_cal_data", set_Filename_cal_data, 0},
@@ -636,7 +667,68 @@ static int32 uart_speed(int32 s) {
       return B0;
   }
 }
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+/******************************************************************************
+ **
+ ** Function:        uart_speed_translate
+ **
+ ** Description:     Return the frequency to corresponding baud rate.
+ **
+ ** Return Value:    Baudrate
+ *
+ *****************************************************************************/
 
+static int32 uart_speed_translate(int32 s) {
+  switch (s) {
+    case B9600:
+      return 9600;
+    case B19200:
+      return 19200;
+    case B38400:
+      return 38400;
+    case B57600:
+      return 57600;
+    case B115200:
+      return 115200;
+    case B230400:
+      return 230400;
+    case B460800:
+      return 460800;
+    case B500000:
+      return 500000;
+    case B576000:
+      return 576000;
+    case B921600:
+      return 921600;
+    case B1000000:
+      return 1000000;
+    case B1152000:
+      return 1152000;
+    case B1500000:
+      return 1500000;
+    case B3000000:
+      return 3000000;
+    default:
+      return 0;
+  }
+}
+
+/******************************************************************************
+ *
+ ** Function            uart_get_speed
+ **
+ ** Description         Get the last baud rate speed.
+
+ ** Return Value:       Value of last baud rate
+ **
+ *****************************************************************************/
+
+static int32 uart_get_speed(struct termios* ti) {
+  int32 speed = 0;
+  speed = (int32)cfgetospeed(ti);
+  return (uart_speed_translate(speed));
+}
+#endif
 /******************************************************************************
  *
  ** Function            uart_set_speed
@@ -705,7 +797,10 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
     return -1;
   }
   tcflush(fd, TCIOFLUSH);
-
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+  last_baudrate = uart_get_speed(&ti);
+  VNDDBG("Last buad rate = %d", last_baudrate);
+#endif
   /* Set actual baudrate */
   if (uart_set_speed(fd, &ti, dwBaudRate) < 0) {
     VNDDBG("Can't set baud rate");
@@ -1126,24 +1221,35 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         }
       } else if (*state == BT_VND_PWR_ON) {
         VNDDBG("power on --------------------------------------\n");
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+        if (independent_reset_mode == 2) {
+          VNDDBG("Reset the download status for Inband IR \n");
+          set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
+          set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
+        }
+#endif
         adapterState = BT_VND_PWR_ON;
 #if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
-        bt_vnd_set_bluetooth_power(FALSE);
-        usleep(5000);
-        bt_vnd_set_bluetooth_power(TRUE);
+        if ((independent_reset_mode == 1) || (independent_reset_mode == 3)) {
+          bt_vnd_set_bluetooth_power(FALSE);
+          usleep(5000);
+          bt_vnd_set_bluetooth_power(TRUE);
 
-        set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-        set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
+          set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
+          set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
+        }
 #endif
 #if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
-        set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-        set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
+        if ((independent_reset_mode == 1) || (independent_reset_mode == 3)) {
+          set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
+          set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
 
-        VNDDBG("-------------- Setting GPIO LOW -----------------\n");
-        bt_vnd_gpio_configuration(FALSE);
-        usleep(1000);
-        VNDDBG("---------------- Setting GPIO HIGH ----------------\n");
-        bt_vnd_gpio_configuration(TRUE);
+          VNDDBG("-------------- Setting GPIO LOW -----------------\n");
+          bt_vnd_gpio_configuration(FALSE);
+          usleep(1000);
+          VNDDBG("---------------- Setting GPIO HIGH ----------------\n");
+          bt_vnd_gpio_configuration(TRUE);
+        }
 #endif
       }
     } break;
@@ -1163,7 +1269,10 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       int bluetooth_opened;
       int num = 0;
       int32_t baudrate = 0;
-
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+      unsigned char inband_reset_cmd[4] = {0x01, 0xfc, 0xfc, 0x00};
+      int cmd_len = 0;
+#endif
       if (is_uart_port) {
         VNDDBG("baudrate_bt %d\n", baudrate_bt);
         VNDDBG("baudrate_fw_init %d\n", baudrate_fw_init);
@@ -1181,6 +1290,8 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VNDDBG("enable_download_fw %d\n", enable_download_fw);
           VNDDBG("uart_break_after_dl_helper %d\n", uart_break_after_dl_helper);
           VNDDBG("uart_sleep_after_dl %d\n", uart_sleep_after_dl);
+          VNDDBG("independent_reset_mode %d\n", independent_reset_mode);
+          VNDDBG("target_soc %s\n", soc_name_dict[target_soc].name);
         }
 #endif
       }
@@ -1209,6 +1320,38 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           baudrate = baudrate_fw_init;
 #endif
           mchar_fd = uart_init_open(mchar_port, baudrate, 0);
+#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
+          if ((independent_reset_mode == 2) && (mchar_fd > 0)) {
+            if (last_baudrate != baudrate) {
+              if (uart_set_speed(mchar_fd, &ti, last_baudrate) < 0) {
+                VNDDBG("Can't set last baud rate %d\n", last_baudrate);
+                close(mchar_fd);
+                return -1;
+              } else {
+                VNDDBG("Baud rate changed from %d to %d\n", baudrate,
+                       last_baudrate);
+              }
+            }
+            cmd_len = sizeof(inband_reset_cmd);
+            tcflush(mchar_fd, TCIOFLUSH);
+            if (write(mchar_fd, inband_reset_cmd, cmd_len) != cmd_len) {
+              VNDDBG("Failed to write in-band reset command \n");
+              return -1;
+            } else {
+              VNDDBG("=========Inband IR trigger sent succesfully=======");
+            }
+            if (last_baudrate != baudrate) {
+              if (uart_set_speed(mchar_fd, &ti, baudrate) < 0) {
+                VNDDBG("Can't set last baud rate %d\n", baudrate);
+                close(mchar_fd);
+                return -1;
+              } else {
+                VNDDBG("Baud rate changed from %d to %d\n", last_baudrate,
+                       baudrate);
+              }
+            }
+          }
+#endif
         }
         if (mchar_fd > 0)
           VNDDBG("open uart port successfully, fd=%d, mchar_port=%s\n",
@@ -1312,7 +1455,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       pthread_mutex_lock(&dev_file_lock);
       if (is_uart_port) {
         if (mchar_fd) {
-          tcflush(mchar_fd, TCIFLUSH);
+          tcflush(mchar_fd, TCIOFLUSH);
           close(mchar_fd);
           mchar_fd = 0;
         }

@@ -404,6 +404,7 @@ inline static void bt_update_bdaddr(void) {
 static void hw_config_callback(void* packet) {
   uint8_t *stream, event, event_code, status, opcode_offset;
   uint16_t opcode, len;
+  uint8 hotfix_revision;
 #if (USE_CONTROLLER_BDADDR == TRUE)
   char* p_tmp;
   HC_BT_HDR* p_evt_buf = (HC_BT_HDR*)packet;
@@ -424,7 +425,12 @@ static void hw_config_callback(void* packet) {
         case OpCodePack(HCI_CONTROLLER_CMD_OGF, HCI_RESET_OCF): {
           VNDDBG("Receive hci reset complete event");
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
-          hw_bt_enable_independent_reset();
+          if ((independent_reset_mode == 1) || (independent_reset_mode == 2)) {
+            hw_bt_enable_independent_reset();
+          } else {
+            VNDDBG("independent_reset_mode not enabled in bt_vendor.conf file");
+            hw_bt_read_fw_revision();
+          }
 #else
           hw_bt_read_fw_revision();
 #endif
@@ -437,9 +443,10 @@ static void hw_config_callback(void* packet) {
         }
         case HCI_CMD_NXP_READ_FW_REVISION: {
           VNDDBG("%s Read FW version reply recieved", __func__);
-          if ((status == 0) && (len == 14)) {
-            ALOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7], stream[6],
-                  stream[9]);
+          if ((status == 0) && (len >= 14)) {
+            hotfix_revision = (len >= 15) ? stream[14] : 0;
+            ALOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
+                  stream[6], stream[9], hotfix_revision);
             ALOGI("ROM version: %02X %02X %02X %02X", stream[10], stream[11],
                   stream[12], stream[13]);
           } else {

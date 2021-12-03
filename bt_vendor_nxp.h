@@ -45,7 +45,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "008.013"
+#define BT_HAL_VERSION "008.014"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -131,7 +131,9 @@ extern int8_t ble_2m_power;
 extern int8_t bt_max_power_sel;
 extern uint8_t set_1m_2m_power;
 extern uint8_t bt_set_max_power;
+extern uint8_t independent_reset_mode;
 extern uint8_t independent_reset_gpio_pin;
+extern uint32_t target_soc;
 /*****************************************************************************
 **   Functions Prototype
 *****************************************************************************/

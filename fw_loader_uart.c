@@ -1695,45 +1695,73 @@ int bt_send_cmd5_data(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
   int8 ret_value = -1;
   int8 retry = 3;
   uint16 uiLenToSend = 0;
-  if (uiProVer == Ver1) {
-    while (retry--) {
-      uiLenToSend = fw_upload_WaitFor_Len(NULL);
-      if (uiLenToSend != HDR_LEN) {
-        PRINT("Unexpected Header Length Received: %d", uiLenToSend);
-        /* If expected header length is invalid, check after signature header */
-        if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
-          PRINT("Heder Signature Timeout CMD5 not Sent");
-          return ret_value;
+  if (cmd5_data != NULL) {
+    if (uiProVer == Ver1) {
+      while (retry--) {
+        uiLenToSend = fw_upload_WaitFor_Len(NULL);
+        if (uiLenToSend != HDR_LEN) {
+          PRINT("Unexpected Header Length Received: %d", uiLenToSend);
+          /* If expected header length is invalid, check after signature header
+           */
+          if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
+            PRINT("Heder Signature Timeout CMD5 not Sent");
+            return ret_value;
+          }
+          if (retry == 0) {
+            return ret_value;
+          }
+        } else {
+          PRINT("CMD5 bootloader length check completed");
+          break;
         }
-        if (retry == 0) {
-          return ret_value;
+      }
+
+      if (fw_upload_SendBuffer(HDR_LEN, cmd5_data, TRUE) == 0) {
+        PRINT("CMD5 sent succesfully");
+        ret_value = 0;
+        if (read_sig_hdr_after_cmd5) {
+          if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
+            PRINT("Wait for signature failed after sending CMD5");
+            ret_value = -2;
+          } else {
+            PRINT("CMD5 signature check completed after cmd5");
+          }
         }
       } else {
-        PRINT("CMD5 bootloader length check completed");
-        break;
-      }
-    }
-
-    if (fw_upload_SendBuffer(HDR_LEN, cmd5_data, TRUE) == 0) {
-      PRINT("CMD5 sent succesfully");
-      ret_value = 0;
-      if (read_sig_hdr_after_cmd5) {
-        if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
-          PRINT("Wait for signature failed after sending CMD5");
-          ret_value = -2;
-        } else {
-          PRINT("CMD5 signature check completed after cmd5");
-        }
+        PRINT("Error while sending CMD5 Data");
       }
     } else {
-      PRINT("Error while sending CMD5 Data");
+      PRINT("Unsupported Protocol version");
     }
-  } else {
-    PRINT("Unsupported Protocol version");
   }
   return ret_value;
 }
-
+#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
+/******************************************************************************
+ *
+ * Function:      bt_get_ir_cmd5_data
+ *
+ * Description:   Fetch IR CMD5 based on conf file settings
+ *
+ * Arguments: NA
+ *
+ * Return Value: Pointer to IR CMD5 if success or NULL
+ *****************************************************************************/
+static uint8* bt_get_ir_cmd5_data(void) {
+  uint8* ir_cmd5_ptr;
+  switch (target_soc) {
+#if CONFIG_88W8987_A0
+    case SOC_88W8987_A0:
+      ir_cmd5_ptr = cmd5_ir_config_8987_A0;
+      break;
+#endif
+    default:
+      ir_cmd5_ptr = NULL;
+      break;
+  }
+  return ir_cmd5_ptr;
+}
+#endif
 /******************************************************************************
  *
  * Name: fw_upload_FW
@@ -1819,10 +1847,10 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   }
 
 #if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
-  PRINT("IR config CMD5 enable_ir_config=%d send_ir_cmd5=%d", enable_ir_config,
-        send_ir_cmd5);
-  if ((enable_ir_config == 1) && (send_ir_cmd5 == TRUE)) {
-    if (bt_send_cmd5_data(cmd5_ir_config, TRUE) == 0) {
+  PRINT("IR config CMD5 independent_reset_mode=%d send_ir_cmd5=%d",
+        independent_reset_mode, send_ir_cmd5);
+  if ((independent_reset_mode == 3) && (send_ir_cmd5 == TRUE)) {
+    if (bt_send_cmd5_data(bt_get_ir_cmd5_data(), TRUE) == 0) {
       check_sig_hdr = FALSE;
       PRINT("\n ========== Download Complete IR CONFIG=========\n\n");
     } else {

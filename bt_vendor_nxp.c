@@ -76,24 +76,6 @@
 #define CONF_MAX_LINE_LEN 255
 #define UNUSED(x) (void)(x)
 #define BD_ADDR_LEN 6
-
-struct soc_info {
-  char* name;
-  int id;
-};
-struct soc_info soc_name_dict[] = {{"SOC_NONE", SOC_NONE},
-                                   {"SOC_88W8977_A2", SOC_88W8977_A2},
-                                   {"SOC_88W8987_A0", SOC_88W8987_A0},
-                                   {"SOC_88W8997_A2", SOC_88W8997_A2},
-                                   {"SOC_88W9000S_B0", SOC_88W9000S_B0},
-                                   {"SOC_88W9098_A0", SOC_88W9098_A0},
-                                   {"SOC_88W9098_A1", SOC_88W9098_A1},
-                                   {"SOC_88W9177_A0", SOC_88W9177_A0},
-                                   {"SOC_88W9177_A1", SOC_88W9177_A1},
-                                   {"SOC_IW416_A1", SOC_IW416_A1},
-                                   {"SOC_IW620_B0", SOC_IW620_B0},
-                                   {"SOC_RW610_A0", SOC_RW610_A0}};
-
 /******************************************************************************
 **  Variables
 ******************************************************************************/
@@ -103,9 +85,9 @@ static uint8_t adapterState;
 unsigned char* bdaddr = NULL;
 const bt_vendor_callbacks_t* vnd_cb = NULL;
 /* for NXP USB/SD interface */
-static char mbt_port[512] = "/dev/mbtchar0";
+static char mbt_port[MAX_PATH_LEN] = "/dev/mbtchar0";
 /* for NXP Uart interface */
-static char mchar_port[512] = "/dev/ttyUSB0";
+static char mchar_port[MAX_PATH_LEN] = "/dev/ttyUSB0";
 static int is_uart_port = 0;
 static int uart_break_before_open = 0;
 static int32_t baudrate_fw_init = 115200;
@@ -123,14 +105,13 @@ uint8_t bt_set_max_power = 0;
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 uint8_t independent_reset_gpio_pin = 0xFF;
 #endif
-#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
 uint8_t ir_host_gpio_pin = 14;
 static char chrdev_name[32] = "/dev/gpiochip5";
-#endif
-/* 0:disable IR(default); 1:OOB IR(FW Config); 2:Inband IR; 3:OOB IR(FW Init
- * CMD5)*/
-uint8_t independent_reset_mode = 0;
-uint32_t target_soc = SOC_NONE;
+/* 0:disable IR(default); 1:OOB IR(FW Config); 2:Inband IR;*/
+uint8_t independent_reset_mode = IR_MODE_NONE;
+/* 0:disable OOB IR Trigger; 1:RFKILL Trigger; 2:GPIO Trigger;*/
+uint8_t send_oob_ir_trigger = IR_TRIGGER_NONE;
+char pFilename_fw_init_config_bin[MAX_PATH_LEN];
 uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0xFE, /* Parameter ID */
     0x06, /* bd_addr length */
@@ -150,21 +131,34 @@ static int uart_sleep_after_dl = 100;
 static int download_helper = 0;
 static int32_t baudrate_dl_helper = 115200;
 static int32_t baudrate_dl_image = 3000000;
-static char pFileName_helper[512] = "/vendor/firmware/helper_uart_3000000.bin";
-static char pFileName_image[512] = "/vendor/firmware/uart8997_bt_v4.bin";
+static char pFileName_helper[MAX_PATH_LEN] =
+    "/vendor/firmware/helper_uart_3000000.bin";
+static char pFileName_image[MAX_PATH_LEN] =
+    "/vendor/firmware/uart8997_bt_v4.bin";
 static int32_t iSecondBaudrate = 0;
 
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
-char pFilename_cal_data[512];
+char pFilename_cal_data[MAX_PATH_LEN];
 #endif
 static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
-#if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
 static int rfkill_id = -1;
 static char* rfkill_state_path = NULL;
-#endif
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 int last_baudrate = 0;
+#endif
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num] = {
+    {.gpio_pin = 13, .high_duration = 2, .low_duration = 2},
+    {.gpio_pin = 13, .high_duration = 4, .low_duration = 4}};
+wakeup_adv_pattern_config_t wakeup_adv_config = {.length = 0};
+wakeup_scan_param_config_t wakeup_scan_param_config = {.le_scan_type = 0,
+                                                       .interval = 128,
+                                                       .window = 96,
+                                                       .own_addr_type = 0,
+                                                       .scan_filter_policy = 0};
+wakeup_local_param_config_t wakup_local_param_config = {.heartbeat_timer_value =
+                                                            8};
 #endif
 /*****************************************************************************
 **
@@ -252,23 +246,26 @@ static int set_bt_tx_power(char* p_conf_name, char* p_conf_value, int param) {
 }
 #endif
 
-static int set_target_soc(char* p_conf_name, char* p_conf_value, int param) {
+static int set_pFilename_fw_init_config_bin(char* p_conf_name,
+                                            char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
-  for (int i = 0; i < (sizeof(soc_name_dict) / sizeof(soc_name_dict[0])); i++) {
-    if (strstr(soc_name_dict[i].name, p_conf_value) != NULL) {
-      target_soc = soc_name_dict[i].id;
-      break;
-    }
-  }
+  strncpy(pFilename_fw_init_config_bin, p_conf_value, MAX_PATH_LEN);
   return 0;
 }
-
 static int set_independent_reset_mode(char* p_conf_name, char* p_conf_value,
                                       int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
   independent_reset_mode = atoi(p_conf_value);
+  return 0;
+}
+
+static int set_send_oob_ir_trigger(char* p_conf_name, char* p_conf_value,
+                                   int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  send_oob_ir_trigger = atoi(p_conf_value);
   return 0;
 }
 
@@ -281,7 +278,6 @@ static int set_independent_reset_gpio_pin(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 #endif
-#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
 static int set_oob_ir_host_gpio_pin(char* p_conf_name, char* p_conf_value,
                                     int param) {
   UNUSED(p_conf_name);
@@ -295,7 +291,6 @@ static int set_charddev_name(char* p_conf_name, char* p_conf_value, int param) {
   strcpy(chrdev_name, p_conf_value);
   return 0;
 }
-#endif
 static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
                               int param) {
   UNUSED(p_conf_name);
@@ -413,6 +408,126 @@ static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 #endif
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+static int set_powerkey_gpio_pin(char* p_conf_name, char* p_conf_value,
+                                 int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_gpio_config[wakeup_power_key].gpio_pin =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_powerkey_gpio_high_duration(char* p_conf_name,
+                                           char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_gpio_config[wakeup_power_key].high_duration =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_powerkey_gpio_low_duration(char* p_conf_name, char* p_conf_value,
+                                          int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_gpio_config[wakeup_power_key].low_duration =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_netflixkey_gpio_pin(char* p_conf_name, char* p_conf_value,
+                                   int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_gpio_config[wakeup_netflix_key].gpio_pin =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_netflixkey_gpio_high_duration(char* p_conf_name,
+                                             char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_gpio_config[wakeup_netflix_key].high_duration =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_netflixkey_gpio_low_duration(char* p_conf_name,
+                                            char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_gpio_config[wakeup_netflix_key].low_duration =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_wakeup_adv_pattern(char* p_conf_name, char* p_conf_value,
+                                  int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  if (wakeup_adv_config.length >= NXP_WAKEUP_ADV_PATTERN_LENGTH) {
+    VNDDBG("%s, wrong length:%d\n", __func__, wakeup_adv_config.length);
+    return -1;
+  }
+  wakeup_adv_config.adv_pattern[wakeup_adv_config.length] =
+      (unsigned char)atoi(p_conf_value);
+  wakeup_adv_config.length += 1;
+  return 0;
+}
+
+static int set_wakeup_scan_type(char* p_conf_name, char* p_conf_value,
+                                int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_scan_param_config.le_scan_type = (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_wakeup_scan_interval(char* p_conf_name, char* p_conf_value,
+                                    int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_scan_param_config.interval = (unsigned short)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_wakeup_scan_window(char* p_conf_name, char* p_conf_value,
+                                  int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_scan_param_config.window = (unsigned short)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_wakeup_scan_own_addr_type(char* p_conf_name, char* p_conf_value,
+                                         int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_scan_param_config.own_addr_type = (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_wakeup_scan_filter_policy(char* p_conf_name, char* p_conf_value,
+                                         int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_scan_param_config.scan_filter_policy =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+
+static int set_wakeup_local_heartbeat_timer_value(char* p_conf_name,
+                                                  char* p_conf_value,
+                                                  int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakup_local_param_config.heartbeat_timer_value =
+      (unsigned char)atoi(p_conf_value);
+  return 0;
+}
+#endif
 /*
  * Current supported entries and corresponding action functions
  */
@@ -425,7 +540,7 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_bt", set_baudrate_bt, 0},
     {"baudrate_fw_init", set_baudrate_fw_init, 0},
     {"bd_address", set_bd_address_buf, 0},
-    {"target_soc", set_target_soc, 0},
+    {"pFilename_fw_init_config_bin", set_pFilename_fw_init_config_bin, 0},
 #if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
     {"ble_1m_power", set_ble_1m_power, 0},
     {"ble_2m_power", set_ble_2m_power, 0},
@@ -436,11 +551,10 @@ static const conf_entry_t conf_table[] = {
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
     {"independent_reset_gpio_pin", set_independent_reset_gpio_pin, 0},
 #endif
-#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
     {"oob_ir_host_gpio_pin", set_oob_ir_host_gpio_pin, 0},
     {"chardev_name", set_charddev_name, 0},
-#endif
     {"independent_reset_mode", set_independent_reset_mode, 0},
+    {"send_oob_ir_trigger", set_send_oob_ir_trigger, 0},
 #ifdef UART_DOWNLOAD_FW
     {"enable_download_fw", set_enable_download_fw, 0},
     {"uart_break_before_change_baudrate", set_uart_break_before_change_baudrate,
@@ -455,6 +569,22 @@ static const conf_entry_t conf_table[] = {
 #endif
 #if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
     {"pFilename_cal_data", set_Filename_cal_data, 0},
+#endif
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+    {"wakeup_power_gpio_pin", set_powerkey_gpio_pin, 0},
+    {"wakeup_power_gpio_high_duration", set_powerkey_gpio_high_duration, 0},
+    {"wakeup_power_gpio_low_duration", set_powerkey_gpio_low_duration, 0},
+    {"wakeup_netflix_gpio_pin", set_netflixkey_gpio_pin, 0},
+    {"wakeup_netflix_gpio_high_duration", set_netflixkey_gpio_high_duration, 0},
+    {"wakeup_netflix_gpio_low_duration", set_netflixkey_gpio_low_duration, 0},
+    {"wakeup_adv_pattern", set_wakeup_adv_pattern, 0},
+    {"wakeup_scan_type", set_wakeup_scan_type, 0},
+    {"wakeup_scan_interval", set_wakeup_scan_interval, 0},
+    {"wakeup_scan_window", set_wakeup_scan_window, 0},
+    {"wakeup_own_addr_type", set_wakeup_scan_own_addr_type, 0},
+    {"wakeup_scan_filter_policy", set_wakeup_scan_filter_policy, 0},
+    {"wakeup_local_heartbeat_timer_value",
+     set_wakeup_local_heartbeat_timer_value, 0},
 #endif
     {(const char*)NULL, NULL, 0}};
 
@@ -1030,8 +1160,6 @@ static int config_uart() {
   set_prop_int32(PROP_BLUETOOTH_OPENED, 1);
   return 0;
 }
-#if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
-
 static bool bt_vnd_is_rfkill_disabled(void) {
   char value[PROPERTY_VALUE_MAX];
 
@@ -1117,9 +1245,6 @@ done:
   }
   return ret;
 }
-#endif /*NXP_ENABLE_RFKILL_SUPPORT*/
-
-#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
 void bt_vnd_gpio_configuration(int value) {
   struct gpiohandle_request req;
   struct gpiohandle_data data;
@@ -1175,7 +1300,6 @@ void bt_vnd_gpio_configuration(int value) {
     return;
   }
 }
-#endif /*NXP_IR_IMX_GPIO_TOGGLE*/
 
 /*****************************************************************************
 **
@@ -1190,7 +1314,7 @@ static int bt_vnd_init(const bt_vendor_callbacks_t* p_cb,
     VNDDBG("vnd_cb is NULL");
   }
   ALOGI("bt_vnd_init\n");
-  VNDDBG("bt_vnd_init --- BT Vendor HAL Ver: %s ---\n", BT_HAL_VERSION);
+  ALOGI("bt_vnd_init --- BT Vendor HAL Ver: %s ---\n", BT_HAL_VERSION);
   if (local_bdaddr) {
     bdaddr = (unsigned char*)malloc(BD_ADDR_LEN);
     if (bdaddr != NULL) {
@@ -1215,6 +1339,9 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 
       if (*state == BT_VND_PWR_OFF) {
         VNDDBG("power off --------------------------------------*\n");
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+        wakeup_kill_heartbeat_thread();
+#endif
         if (adapterState == BT_VND_PWR_ON) {
           VNDDBG("BT adapter switches from ON to OFF .. \n");
           adapterState = BT_VND_PWR_OFF;
@@ -1222,15 +1349,14 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       } else if (*state == BT_VND_PWR_ON) {
         VNDDBG("power on --------------------------------------\n");
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
-        if (independent_reset_mode == 2) {
+        if (independent_reset_mode == IR_MODE_INBAND_VSC) {
           VNDDBG("Reset the download status for Inband IR \n");
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
           set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
         }
 #endif
         adapterState = BT_VND_PWR_ON;
-#if (NXP_ENABLE_RFKILL_SUPPORT == TRUE)
-        if ((independent_reset_mode == 1) || (independent_reset_mode == 3)) {
+        if (send_oob_ir_trigger == IR_TRIGGER_RFKILL) {
           bt_vnd_set_bluetooth_power(FALSE);
           usleep(5000);
           bt_vnd_set_bluetooth_power(TRUE);
@@ -1238,9 +1364,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
           set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
         }
-#endif
-#if (NXP_IR_IMX_GPIO_TOGGLE == TRUE)
-        if ((independent_reset_mode == 1) || (independent_reset_mode == 3)) {
+        if (send_oob_ir_trigger == IR_TRIGGER_GPIO) {
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
           set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
 
@@ -1250,7 +1374,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VNDDBG("---------------- Setting GPIO HIGH ----------------\n");
           bt_vnd_gpio_configuration(TRUE);
         }
-#endif
       }
     } break;
     case BT_VND_OP_FW_CFG:
@@ -1291,7 +1414,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VNDDBG("uart_break_after_dl_helper %d\n", uart_break_after_dl_helper);
           VNDDBG("uart_sleep_after_dl %d\n", uart_sleep_after_dl);
           VNDDBG("independent_reset_mode %d\n", independent_reset_mode);
-          VNDDBG("target_soc %s\n", soc_name_dict[target_soc].name);
         }
 #endif
       }
@@ -1321,7 +1443,8 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 #endif
           mchar_fd = uart_init_open(mchar_port, baudrate, 0);
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
-          if ((independent_reset_mode == 2) && (mchar_fd > 0)) {
+          if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&
+              (mchar_fd > 0)) {
             if (last_baudrate != baudrate) {
               if (uart_set_speed(mchar_fd, &ti, last_baudrate) < 0) {
                 VNDDBG("Can't set last baud rate %d\n", last_baudrate);

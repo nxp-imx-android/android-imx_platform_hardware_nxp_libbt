@@ -45,7 +45,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "008.014"
+#define BT_HAL_VERSION "008.018"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -55,7 +55,7 @@ typedef unsigned char BOOLEAN;
 #define TRUE 1
 #define FALSE 0
 #define WRITE_BD_ADDRESS_SIZE 8
-
+#define MAX_PATH_LEN 512
 #define DOWNLOAD_SUCCESS 0x0
 #define OPEN_SERIAL_PORT_OR_FILE_ERROR 0x1
 #define FEEK_SEEK_ERROR 0x2
@@ -72,6 +72,8 @@ typedef unsigned char BOOLEAN;
 
 #define BLE_SET_1M_POWER 0x01
 #define BLE_SET_2M_POWER 0x02
+
+#define NXP_WAKEUP_ADV_PATTERN_LENGTH 16  // company id + vendor information
 
 /* Run-time configuration file */
 #ifndef VENDOR_LIB_CONF_FILE
@@ -94,20 +96,12 @@ typedef unsigned char BOOLEAN;
 #define NXP_ENABLE_INDEPENDENT_RESET_VSC FALSE
 #endif
 
-#ifndef NXP_ENABLE_INDEPENDENT_RESET_CMD5
-#define NXP_ENABLE_INDEPENDENT_RESET_CMD5 FALSE
-#endif
-
-#ifndef NXP_IR_IMX_GPIO_TOGGLE
-#define NXP_IR_IMX_GPIO_TOGGLE FALSE
-#endif
-
-#ifndef NXP_ENABLE_RFKILL_SUPPORT
-#define NXP_ENABLE_RFKILL_SUPPORT FALSE
-#endif
-
 #ifndef NXP_VND_DBG
 #define NXP_VND_DBG FALSE
+#endif
+
+#ifndef NXP_HEARTBEAT_FEATURE_SUPPORT
+#define NXP_HEARTBEAT_FEATURE_SUPPORT FALSE
 #endif
 
 #if (NXP_VND_DBG == TRUE)
@@ -115,6 +109,39 @@ typedef unsigned char BOOLEAN;
   ALOGD("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define VNDDBG(fmt, ...)
+#endif
+
+/******************************************************************************
+**  Structure
+******************************************************************************/
+enum { IR_TRIGGER_NONE, IR_TRIGGER_RFKILL, IR_TRIGGER_GPIO };
+enum { IR_MODE_NONE, IR_MODE_OOB_VSC, IR_MODE_INBAND_VSC };
+
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+enum { wakeup_power_key, wakeup_netflix_key, wakeup_key_num };
+
+typedef struct {
+  unsigned char gpio_pin;
+  unsigned char high_duration;  // 100ms
+  unsigned char low_duration;   // 100ms
+} wakeup_gpio_config_t;
+
+typedef struct {
+  unsigned char length;
+  unsigned char adv_pattern[NXP_WAKEUP_ADV_PATTERN_LENGTH];
+} wakeup_adv_pattern_config_t;
+
+typedef struct {
+  unsigned char le_scan_type;
+  unsigned short interval;
+  unsigned short window;
+  unsigned char own_addr_type;
+  unsigned char scan_filter_policy;
+} wakeup_scan_param_config_t;
+
+typedef struct {
+  unsigned char heartbeat_timer_value;  // 100ms
+} wakeup_local_param_config_t;
 #endif
 
 /***********************************************************
@@ -133,7 +160,14 @@ extern uint8_t set_1m_2m_power;
 extern uint8_t bt_set_max_power;
 extern uint8_t independent_reset_mode;
 extern uint8_t independent_reset_gpio_pin;
-extern uint32_t target_soc;
+extern char pFilename_fw_init_config_bin[];
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+extern wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num];
+extern wakeup_adv_pattern_config_t wakeup_adv_config;
+extern wakeup_scan_param_config_t wakeup_scan_param_config;
+extern wakeup_local_param_config_t wakup_local_param_config;
+void wakeup_kill_heartbeat_thread(void);
+#endif
 /*****************************************************************************
 **   Functions Prototype
 *****************************************************************************/

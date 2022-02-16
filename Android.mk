@@ -48,18 +48,6 @@ LOCAL_SRC_FILES += \
     fw_loader_uart_v2.c
 endif
 endif
-LOCAL_CFLAGS += \
-    -DCONFIG_88W8977_A2       \
-    -DCONFIG_88W8987_A0       \
-    -DCONFIG_88W8997_A2       \
-    -DCONFIG_88W9000S_B0      \
-    -DCONFIG_88W9098_A0       \
-    -DCONFIG_88W9098_A1       \
-    -DCONFIG_88W9177_A0       \
-    -DCONFIG_88W9177_A1       \
-    -DCONFIG_IW416_A1         \
-    -DCONFIG_IW620_B0         \
-    -DCONFIG_RW610_A0
 
 LOCAL_SHARED_LIBRARIES := \
     libcutils \

@@ -26,10 +26,6 @@
 #include <stdlib.h>
 #include <sys/select.h>
 
-#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
-#include "nxp_soc_conf.h"
-#endif
-
 #define LOG_TAG "fw_loader"
 #include <log/log.h>
 #include <cutils/properties.h>
@@ -49,7 +45,6 @@
 #define CMD4 0x4
 #define CMD6 0x6
 #define CMD7 0x7
-
 #define V1_HEADER_DATA_REQ 0xa5
 #define V1_REQUEST_ACK 0x5a
 #define V1_START_INDICATION 0xaa
@@ -61,7 +56,7 @@
 #define V3_CRC_ERROR 0x7c
 
 #define PRINT(...)         printf(__VA_ARGS__)
-
+#define FW_INIT_CONFIG_LEN 64
 #define REQ_HEADER_LEN 1
 #define A6REQ_PAYLOAD_LEN 8
 #define AbREQ_PAYLOAD_LEN 3
@@ -107,12 +102,15 @@ static BOOLEAN cmd7_Req = FALSE;
 static BOOLEAN EntryPoint_Req = FALSE;
 static uint32 change_baudrata_buffer_len = 0;
 static uint32 cmd7_change_timeout_len = 0;
-
+static uint32 cmd5_len = 0;
 // CMD5 Header to change bootload baud rate
 uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                  0x2c, 0x00, 0x00, 0x00, 0x77, 0xdb, 0xfd, 0xe0};
 uint8 m_Buffer_CMD7_ChangeTimeoutValue[16] = {0x07,0x00,0x00,0x00,0x70,0x00,0x00,0x00,
                                              0x00,0x00,0x00,0x00,0x5b,0x88,0xf8,0xba};
+#if (UART_DOWNLOAD_FW == TRUE)
+uint8 fw_init_config_bin[FW_INIT_CONFIG_LEN];
+#endif
 
 const UART_BAUDRATE UartCfgTbl[] = {
     {115200, 16, 0x0075F6FD}, {3000000, 1, 0x00C00000},
@@ -376,12 +374,10 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
       if (uiMs) {
         currTime = fw_upload_GetTime();
         if ((currTime - startTime) > uiMs) {
-#ifdef DEBUG_PRINT
-          PRINT(
+          VNDDBG(
               "\n fw_upload_WaitForHeaderSignature Timeout, Header Received: "
               "0x%x, timeout %d, elapsed time %llu",
               ucRcvdHeader, uiMs, (currTime - startTime));
-#endif
           bResult = FALSE;
           break;
         }
@@ -437,6 +433,9 @@ static uint16 fw_upload_WaitFor_Len(FILE *pFile) {
     // Successful. Send back the ack.
     if ((ucRcvdHeader == V1_HEADER_DATA_REQ) || (ucRcvdHeader == V1_START_INDICATION)) {
       fw_upload_ComWriteChar(mchar_fd, V1_REQUEST_ACK);
+#ifdef DEBUG_PRINT
+      PRINT("\n  BOOT_HEADER_ACK 0x5a is sent\n");
+#endif
       if (ucRcvdHeader == V1_START_INDICATION) {
         longjmp(resync, 1);
       }
@@ -971,13 +970,13 @@ static void fw_upload_GetLast5Bytes(uint8 *buf) {
 
   if ((fifosize < 6) && ((uiTempLen == HDR_LEN) || (uiTempLen == fw_upload_GetDataLen(buf)))) {
 #ifdef DEBUG_PRINT
-    PRINT("=========>success case\n");
+    PRINT("=========>success case fifo size= %d\n", fifosize);
 #endif
     uiErrCase = FALSE;
   } else  // start to get last valid 5 bytes
   {
 #ifdef DEBUG_PRINT
-    PRINT("=========>fail case\n");
+    PRINT("=========>fail case fifo size= %d \n", fifosize);
 #endif
     while (fw_upload_lenValid(&uiTempLen, ucString) == FALSE) {
       fw_upload_GetHeaderStartBytes(ucString);
@@ -1120,18 +1119,24 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
           uiBytesToSend = HDR_LEN;
           uiFirstChunkSent = 1;
         } else {
-          PRINT("\nNon-empty terminating else statement\n");
+          PRINT("Non-empty terminating else statement uiLenToSend = %d ",
+                uiLenToSend);
         }
       } else if (uiLenToSend == HDR_LEN) {
 // Out of sync. Restart sending buffer
 #ifdef DEBUG_PRINT
-        PRINT("\n3.  Restart sending the buffer...\n");
+        PRINT("Restart sending the 1st chunk...");
 #endif
-        fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiLenToSend);
+        fw_upload_ComWriteChars(mchar_fd, (uint8*)ucBuf, uiLenToSend);
         uiBytesToSend = uiDataLen;
         uiFirstChunkSent = 0;
+      } else if (uiLenToSend == uiDataLen) {
+        PRINT("Restart sending 2nd chunk...");
+        fw_upload_ComWriteChars(mchar_fd, (uint8*)&ucBuf[HDR_LEN], uiLenToSend);
+        uiBytesToSend = HDR_LEN;
+        uiFirstChunkSent = 1;
       } else {
-        PRINT("\nNon-empty else statement\n");
+        PRINT("Non-empty else statement uiLenToSend = %d", uiLenToSend);
       }
     }
     // Get last 5 bytes now
@@ -1269,8 +1274,8 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
     // was error free (CRC ok) or this is the first packet received.
     //  We can clear the ucByteBuffer and populate fresh data.
     memset (ucByteBuffer, 0, MAX_LENGTH* sizeof(uint8));
-    memcpy(ucByteBuffer,pFileBuffer+ulOffset - change_baudrata_buffer_len - cmd7_change_timeout_len,uiLenToSend);
-   ulCurrFileSize = ulOffset - change_baudrata_buffer_len - cmd7_change_timeout_len + uiLenToSend;
+    memcpy(ucByteBuffer,pFileBuffer+ulOffset - change_baudrata_buffer_len - cmd7_change_timeout_len - cmd5_len,uiLenToSend);
+   ulCurrFileSize = ulOffset - change_baudrata_buffer_len - cmd7_change_timeout_len - cmd5_len+ uiLenToSend;
 #ifdef TEST_CODE
 
     if (uiLenToSend == HDR_LEN)
@@ -1554,6 +1559,7 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
         continue;
       } else if (uiLenToSend == HDR_LEN) {
         // Download CMD5 header and Payload packet.
+        tcflush(mchar_fd, TCIOFLUSH);
         memcpy(ucBuffer, m_Buffer_CMD5_Header, HDR_LEN);
         memcpy(ucBuffer + HDR_LEN, uartConfig, uiLen);
         fw_upload_SendBuffer(uiLenToSend, ucBuffer, TRUE);
@@ -1593,7 +1599,7 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
         }
       }
     } else {
-      PRINT("\nNon-empty terminating else statement\n");
+      PRINT("%d Protocol Version not supported", uiProVer);
     }
   }
   return ucResult;
@@ -1673,12 +1679,11 @@ static int32 fw_Change_Timeout()
   }
   return Status;
 }
-
 /******************************************************************************
  *
- * Function:      bt_send_cmd5_data
+ * Function:      bt_send_cmd5_data_ver3
  *
- * Description:   Sends CMD5 Data
+ * Description:   Sends CMD5 Data for Protocol Version 3
  *
  * Arguments:
  *   cmd5_data:   Buffer containing CMD5 Header and its Payload
@@ -1691,75 +1696,133 @@ static int32 fw_Change_Timeout()
  *   -1 if CMD5 is not sent
  *   -2 if read_sig_hdr_after_cmd5 fails
  *****************************************************************************/
-int bt_send_cmd5_data(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
+int bt_send_cmd5_data_ver3(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5)
+{
+  BOOLEAN header_sent = FALSE;
   int8 ret_value = -1;
-  int8 retry = 3;
-  uint16 uiLenToSend = 0;
   if (cmd5_data != NULL) {
-    if (uiProVer == Ver1) {
-      while (retry--) {
-        uiLenToSend = fw_upload_WaitFor_Len(NULL);
-        if (uiLenToSend != HDR_LEN) {
-          PRINT("Unexpected Header Length Received: %d", uiLenToSend);
-          /* If expected header length is invalid, check after signature header
-           */
-          if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
-            PRINT("Heder Signature Timeout CMD5 not Sent");
-            return ret_value;
-          }
-          if (retry == 0) {
-            return ret_value;
+    while (ret_value != 0) {
+      if (fw_upload_WaitFor_Req(0)) {
+        if (uiNewLen != 0 && uiNewError == 0) {
+          fw_upload_Send_Ack(V3_REQUEST_ACK);
+          if (header_sent == FALSE && uiNewLen == HDR_LEN) {
+            fw_upload_ComWriteChars(mchar_fd, cmd5_data, uiNewLen);
+            header_sent = TRUE;
+            VNDDBG("Sent CMD5 Header: %d", uiNewLen);
+          } else if (header_sent == TRUE) {
+            fw_upload_ComWriteChars(mchar_fd, cmd5_data + HDR_LEN, uiNewLen);
+            header_sent = FALSE;
+            ret_value = 0;
+            cmd5_len = uiNewLen + HDR_LEN;
+            VNDDBG("Sent CMD5 payload: %d", uiNewLen);
+          } else {
+            VNDDBG(
+                "Unexpected Error CMD5 uiNewLen = %d uiNewError = %d "
+                "header_sent=%d",
+                uiNewLen, uiNewError, header_sent);
           }
         } else {
-          PRINT("CMD5 bootloader length check completed");
+          tcflush(mchar_fd, TCIFLUSH);
+          fw_upload_Send_Ack(V3_TIMEOUT_ACK);
+          if (uiNewError & BT_MIC_FAIL_BIT) {
+            change_baudrata_buffer_len = 0;
+            cmd5_len = 0;
+            ulCurrFileSize = 0;
+            ulLastOffsetToSend = 0xFFFF;
+          }
+        }
+      }
+      if ((ret_value != 0) || read_sig_hdr_after_cmd5) {
+        if (!fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC)) {
+          ret_value = -2;
           break;
         }
       }
-
-      if (fw_upload_SendBuffer(HDR_LEN, cmd5_data, TRUE) == 0) {
-        PRINT("CMD5 sent succesfully");
-        ret_value = 0;
-        if (read_sig_hdr_after_cmd5) {
-          if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
-            PRINT("Wait for signature failed after sending CMD5");
-            ret_value = -2;
-          } else {
-            PRINT("CMD5 signature check completed after cmd5");
-          }
-        }
-      } else {
-        PRINT("Error while sending CMD5 Data");
-      }
-    } else {
-      PRINT("Unsupported Protocol version");
     }
   }
   return ret_value;
 }
-#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
+
 /******************************************************************************
  *
- * Function:      bt_get_ir_cmd5_data
+ * Function:      bt_send_cmd5_data_ver1
  *
- * Description:   Fetch IR CMD5 based on conf file settings
+ * Description:   Sends CMD5 Data for Protocol Version 1
+ *
+ * Arguments:
+ *   cmd5_data:   Buffer containing CMD5 Header and its Payload
+ *
+ *   read_sig_hdr_after_cmd5: Read the Signature Header after sending CMD5 over
+ *                            UART
+ *
+ * Return Value:
+ *    0 if success and read_sig_hdr_after_cmd5 is FALSE.
+ *    Len of next header if success and read_sig_hdr_after_cmd5 is true
+ *   -1 if CMD5 is not sent
+ *****************************************************************************/
+int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
+  int ret_value = -1;
+  int8 retry = 3;
+  uint16 uiLenToSend = 0;
+  if (cmd5_data != NULL) {
+    while (retry--) {
+      uiLenToSend = fw_upload_WaitFor_Len(NULL);
+      if (uiLenToSend != HDR_LEN) {
+        PRINT("Unexpected Header Length Received: %d", uiLenToSend);
+        /* If expected header length is invalid, check after signature header
+         */
+        if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
+          PRINT("Header Signature Timeout CMD5 not Sent");
+          return ret_value;
+        }
+        if (retry == 0) {
+          return ret_value;
+        }
+      } else {
+        PRINT("CMD5 bootloader length check completed");
+        break;
+      }
+    }
+    tcflush(mchar_fd, TCIOFLUSH);
+    ret_value =
+        fw_upload_SendBuffer(HDR_LEN, cmd5_data, !read_sig_hdr_after_cmd5);
+    PRINT("CMD5 sent succesfully");
+  }
+  return ret_value;
+}
+#if (UART_DOWNLOAD_FW == TRUE)
+/******************************************************************************
+ *
+ * Function:      bt_get_fw_config_cmd5_data
+ *
+ * Description:   Fetch FW conig CMD5 based on conf file settings
  *
  * Arguments: NA
  *
- * Return Value: Pointer to IR CMD5 if success or NULL
+ * Return Value: Pointer to FW Config CMD5 if success or NULL
  *****************************************************************************/
-static uint8* bt_get_ir_cmd5_data(void) {
-  uint8* ir_cmd5_ptr;
-  switch (target_soc) {
-#if CONFIG_88W8987_A0
-    case SOC_88W8987_A0:
-      ir_cmd5_ptr = cmd5_ir_config_8987_A0;
-      break;
-#endif
-    default:
-      ir_cmd5_ptr = NULL;
-      break;
+static uint8* bt_get_fw_config_cmd5_data(void) {
+  VNDDBG("Opening CMD5 file");
+  FILE* fp = fopen(pFilename_fw_init_config_bin, "r");
+  uint8* ret = NULL;
+  if (fp == NULL) {
+    VNDDBG("%s file not found : error %s ", pFilename_fw_init_config_bin,
+           strerror(errno));
+  } else {
+    /*Make sure length of file is in limit and copied in fw_init_config_bin */
+    long data_size;
+    fseek(fp, 0, SEEK_END);
+    data_size = ftell(fp);
+    if (data_size <= FW_INIT_CONFIG_LEN) {
+      fseek(fp, 0, SEEK_SET);
+      ret = (fread(fw_init_config_bin, 1, data_size, fp) == data_size)
+                ? fw_init_config_bin
+                : NULL;
+    }
+    fclose(fp);
+    VNDDBG("Closing CMD5 file");
   }
-  return ir_cmd5_ptr;
+  return ret;
 }
 #endif
 /******************************************************************************
@@ -1796,9 +1859,9 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   uint16 uiLenToSend = 0;
   BOOLEAN bFirstWaitHeaderSignature = TRUE;
   BOOLEAN check_sig_hdr = TRUE;
-#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
-  /*IR CMD5 needs to be sent before Helper and Firmware only once*/
-  static BOOLEAN send_ir_cmd5 = TRUE;
+#if (UART_DOWNLOAD_FW == TRUE)
+  /*FW config CMD5 needs to be sent before Helper and Firmware only once*/
+  static BOOLEAN send_fw_config_cmd5 = TRUE;
 #endif
   // Open File for reading.
   pFile = fopen(pFileName, "rb");
@@ -1846,20 +1909,24 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     }
   }
 
-#if ((UART_DOWNLOAD_FW == TRUE) && (NXP_ENABLE_INDEPENDENT_RESET_CMD5 == TRUE))
-  PRINT("IR config CMD5 independent_reset_mode=%d send_ir_cmd5=%d",
-        independent_reset_mode, send_ir_cmd5);
-  if ((independent_reset_mode == 3) && (send_ir_cmd5 == TRUE)) {
-    if (bt_send_cmd5_data(bt_get_ir_cmd5_data(), TRUE) == 0) {
+#if ((UART_DOWNLOAD_FW == TRUE) )
+  VNDDBG("Sending FW Config");
+  if (send_fw_config_cmd5 == TRUE) {
+    if (((uiProVer == Ver1) &&
+         ((uiLenToSend = bt_send_cmd5_data_ver1(bt_get_fw_config_cmd5_data(),
+                                                TRUE)) == HDR_LEN)) ||
+        ((uiProVer == Ver3) &&
+         (bt_send_cmd5_data_ver3(bt_get_fw_config_cmd5_data(), TRUE) == 0))) {
       check_sig_hdr = FALSE;
-      PRINT("\n ========== Download Complete IR CONFIG=========\n\n");
+      PRINT("\n ========== Download Complete FW CONFIG=========\n\n");
     } else {
-      PRINT("Sending IR config CMD5 FAILED");
+      VNDDBG("Sending FW config CMD5 FAILED protocol version %d", uiProVer + 1);
     }
-    send_ir_cmd5 = FALSE;
+    send_fw_config_cmd5 = FALSE;
   }
 #endif
   // Calculate the size of the file to be downloaded.
+  VNDDBG("Opening FW file");
   result = fseek(pFile, 0, SEEK_END);
   if (result != 0) {
     PRINT("\nfseek failed\n");
@@ -1900,7 +1967,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     }
   }
    ulCurrFileSize = 0;
-
+  VNDDBG("Closing FW file");
   // Jump to here in case of protocol resync.
   if(setjmp(resync) > 1) {
     PRINT("\nSome error occured");
@@ -1918,12 +1985,13 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
       fclose(pFile);
       return HEADER_SIGNATURE_TIMEOUT;
     }
-    iSecondBaudRate = 0;
-
     if (uiProVer == Ver1) {
       // Read the 'Length' bytes requested by Helper
-      uiLenToSend = fw_upload_WaitFor_Len(pFile);
-      PRINT("Number of bytes to be downloaded: %8ld\r",ulTotalFileSize);
+      if (check_sig_hdr) {
+        uiLenToSend = fw_upload_WaitFor_Len(pFile);
+      }
+      PRINT("Number of bytes to be downloaded: %8ld\r", ulTotalFileSize);
+      tcflush(mchar_fd, TCIOFLUSH);
       do {
         uiLenToSend = fw_upload_V1SendLenBytes(pFileBuffer, uiLenToSend);
       } while (uiLenToSend != 0);
@@ -1960,6 +2028,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
             if(uiNewError & BT_MIC_FAIL_BIT)
             {
               change_baudrata_buffer_len = 0;
+              cmd5_len = 0;
               ulCurrFileSize = 0;
               ulLastOffsetToSend = 0xFFFF;
             }
@@ -1977,20 +2046,21 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
             fw_upload_Send_Ack(V3_REQUEST_ACK);
             fseek(pFile, 0, SEEK_SET);
             change_baudrata_buffer_len = 0;
+            cmd5_len = 0;
             ulCurrFileSize = 0;
             ulLastOffsetToSend = 0xFFFF;
           } else {
-            PRINT("\nNon-empty terminating else statement\n");
+            PRINT("Non-empty terminating else statement uiNewError = %d",
+                  uiNewError);
           }
         }
       }
-#ifdef TEST_CODE
-      PRINT("\n");
-#endif
       PRINT("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
     } else {
-      PRINT("\nNot downloaded\n");
+      PRINT("%d Protocol Version not supported", uiProVer);
     }
+    iSecondBaudRate = 0;
+    check_sig_hdr = TRUE;
   }
 
   if(pFileBuffer != NULL)

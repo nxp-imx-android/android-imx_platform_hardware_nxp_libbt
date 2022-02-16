@@ -32,22 +32,6 @@ typedef struct {
   uint32 iClkDivisor;
 } UART_BAUDRATE;
 
-enum {
-  SOC_NONE,
-  SOC_88W8977_A2,
-  SOC_88W8987_A0,
-  SOC_88W8997_A2,
-  SOC_88W9000S_B0,
-  SOC_88W9098_A0,
-  SOC_88W9098_A1,
-  SOC_88W9177_A0,
-  SOC_88W9177_A1,
-  SOC_IW416_A1,
-  SOC_IW620_B0,
-  SOC_RW610_A0,
-  SOC_MAX
-};
-
 extern int mchar_fd;
 extern int uart_break_before_change_baudrate;
 extern uint8_t independent_reset_mode;

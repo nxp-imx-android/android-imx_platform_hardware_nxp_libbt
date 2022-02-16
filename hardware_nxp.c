@@ -20,6 +20,7 @@
 
 #include <assert.h>
 #include <log/log.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,6 +113,21 @@
 
 #define OpCodePack(ogf, ocf) (uint16_t)((ocf & 0x03ff) | (ogf << 10))
 
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+#define HCI_CMD_NXP_BLE_WAKEUP 0xFD52
+#define HCI_CMD_NXP_SUB_OCF_HEARTBEAT 0x00
+#define HCI_CMD_NXP_SUB_OCF_GPIO_CONFIG 0x01
+#define HCI_CMD_NXP_SUB_OCF_ADV_PATTERN_CONFIG 0x02
+#define HCI_CMD_NXP_SUB_OCF_SCAN_PARAM_CONFIG 0x03
+#define HCI_CMD_NXP_SUB_OCF_LOCAL_PARAM_CONFIG 0x04
+#define HCI_CMD_NXP_SUB_OCF_SIZE 1
+#define HCI_CMD_NXP_GPIO_CONFIG_SIZE 4
+#define HCI_CMD_NXP_ADV_PATTERN_LENGTH_SIZE 1
+#define HCI_CMD_NXP_SCAN_PARAM_CONFIG_SIZE 7
+#define HCI_CMD_NXP_LOCAL_PARAM_CONFIG_SIZE 1
+#define TIMER_UNIT_MS_TO_US 1000
+#endif
+
 /******************************************************************************
 **  Local type definitions
 ******************************************************************************/
@@ -145,6 +161,10 @@ static void hw_ble_set_power_level(void);
 #if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
 static void hw_bt_enable_max_power_level_cmd(void);
 #endif
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+static void set_wakeup_scan_parameter(void);
+static void wakeup_event_handler(uint8_t sub_ocf, uint8_t status);
+#endif
 /***********************************************************
  *  Local variables
  ***********************************************************
@@ -164,6 +184,15 @@ static uint8_t write_pcm_link_settings[WRITE_PCM_LINK_SETTINGS_SIZE] = {0x04,
                                                                         0x00};
 /** PCM LINK settings, SCO slot1 */
 static uint8_t set_sco_data_path[SET_SCO_DATA_PATH_SIZE] = {0x01};
+#endif
+
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+static pthread_mutex_t mtx_wakeup = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cond_wakeup = PTHREAD_COND_INITIALIZER;
+static pthread_t p_headtbeat;
+static bool heartbeat_event_received = false;
+static unsigned char wakeup_gpio_config_state = wakeup_key_num;
+static bool send_heartbeat = FALSE;
 #endif
 
 /***********************************************************
@@ -294,7 +323,11 @@ static void hw_sco_config_cb(void* p_mem) {
       vnd_cb->scocfg_cb(BT_VND_OP_RESULT_SUCCESS);
       /* fw config succeeds */
       ALOGI("FW config succeeds!");
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+      set_wakeup_scan_parameter();
+#else
       vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+#endif
       return;
 
     default:
@@ -316,7 +349,11 @@ static void hw_sco_config_cb(void* p_mem) {
   vnd_cb->scocfg_cb(BT_VND_OP_RESULT_FAIL);
   /* fw config succeeds */
   ALOGI("FW config succeeds!");
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+  set_wakeup_scan_parameter();
+#else
   vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+#endif
 }
 
 /*******************************************************************************
@@ -351,7 +388,11 @@ static void hw_sco_config(void) {
   vnd_cb->scocfg_cb(BT_VND_OP_RESULT_FAIL);
   /* fw config succeeds */
   ALOGI("FW config succeeds!");
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+  set_wakeup_scan_parameter();
+#else
   vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+#endif
 }
 #endif
 
@@ -402,9 +443,8 @@ inline static void bt_update_bdaddr(void) {
 **
 *******************************************************************************/
 static void hw_config_callback(void* packet) {
-  uint8_t *stream, event, event_code, status, opcode_offset;
+  uint8_t* stream, event, event_code, status, opcode_offset;
   uint16_t opcode, len;
-  uint8 hotfix_revision;
 #if (USE_CONTROLLER_BDADDR == TRUE)
   char* p_tmp;
   HC_BT_HDR* p_evt_buf = (HC_BT_HDR*)packet;
@@ -425,7 +465,8 @@ static void hw_config_callback(void* packet) {
         case OpCodePack(HCI_CONTROLLER_CMD_OGF, HCI_RESET_OCF): {
           VNDDBG("Receive hci reset complete event");
 #if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
-          if ((independent_reset_mode == 1) || (independent_reset_mode == 2)) {
+          if ((independent_reset_mode == IR_MODE_OOB_VSC) ||
+              (independent_reset_mode == IR_MODE_INBAND_VSC)) {
             hw_bt_enable_independent_reset();
           } else {
             VNDDBG("independent_reset_mode not enabled in bt_vendor.conf file");
@@ -444,9 +485,13 @@ static void hw_config_callback(void* packet) {
         case HCI_CMD_NXP_READ_FW_REVISION: {
           VNDDBG("%s Read FW version reply recieved", __func__);
           if ((status == 0) && (len >= 14)) {
-            hotfix_revision = (len >= 15) ? stream[14] : 0;
-            ALOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
-                  stream[6], stream[9], hotfix_revision);
+            if (len >= 15) {
+              ALOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
+                    stream[6], stream[9], stream[14]);
+            } else {
+              ALOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7], stream[6],
+                    stream[9]);
+            }
             ALOGI("ROM version: %02X %02X %02X %02X", stream[10], stream[11],
                   stream[12], stream[13]);
           } else {
@@ -493,7 +538,11 @@ static void hw_config_callback(void* packet) {
           /* fw config succeeds */
           VNDDBG("FW config succeeds!");
           if (vnd_cb) {
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+            set_wakeup_scan_parameter();
+#else
             vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+#endif
           }
 #endif
           break;
@@ -569,11 +618,21 @@ static void hw_config_callback(void* packet) {
 #else
             /* fw config succeeds */
             VNDDBG("FW config succeeds!");
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+            set_wakeup_scan_parameter();
+#else
             if (vnd_cb) {
               vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
             }
 #endif
+#endif
           }
+          break;
+        }
+#endif
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+        case HCI_CMD_NXP_BLE_WAKEUP: {
+          wakeup_event_handler(stream[opcode_offset + 3], status);
           break;
         }
 #endif
@@ -630,7 +689,11 @@ static void hw_config_set_bdaddr(void) {
 #else
       /* fw config succeeds */
       VNDDBG("FW config succeeds!");
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+      set_wakeup_scan_parameter();
+#else
       if (vnd_cb) vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+#endif
 #endif
       return;
     } else if (bdaddr) {
@@ -866,7 +929,7 @@ static void hw_bt_enable_max_power_level_cmd(void) {
  **
  ** Function:      hw_bt_enable_independent_reset
  **
- ** Description:   Sends command to enable out band independent reset
+ ** Description:   Sends command to enable Inband / OutofBand independent reset
  **
  ** Return Value:  NA
  **
@@ -879,11 +942,15 @@ static void hw_bt_enable_independent_reset(void) {
   packet = make_command(opcode, HCI_CMD_NXP_INDEPENDENT_RESET_SETTING_SIZE);
   if (packet) {
     stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
-    stream[0] = 0x01;
-    stream[1] = independent_reset_gpio_pin;
-
+    stream[0] = independent_reset_mode;
+    if (independent_reset_mode == IR_MODE_OOB_VSC) {
+      stream[1] = independent_reset_gpio_pin;
+    } else {
+      stream[1] = 0xFF;
+    }
     if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
-      ALOGI("%s Enable Independent Reset command sent\n", __func__);
+      ALOGI("%s Enable Independent Reset %d command sent\n", __func__,
+            independent_reset_mode);
     }
   } else {
     VNDDBG("%s no valid packet \n", __func__);
@@ -891,6 +958,268 @@ static void hw_bt_enable_independent_reset(void) {
   return;
 }
 #endif
+
+#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+/*******************************************************************************
+**
+** Function         kill_thread_signal_handler
+**
+** Description      a signal handler to kill the heartbeat thread
+**
+** Returns          None
+**
+*******************************************************************************/
+static void kill_thread_signal_handler(int sig) {
+  (void)sig;
+  ALOGI("send_heartbeat_thread killed\n");
+  pthread_exit(0);
+}
+
+/*******************************************************************************
+**
+** Function         send_heartbeat_thread
+**
+** Description      thread function for periodically sending HCI cmd (heartbeat)
+**
+** Returns          None
+**
+*******************************************************************************/
+static void* send_heartbeat_thread(void* data) {
+  (void)data;
+  send_heartbeat = TRUE;
+
+  usleep(100000);
+  signal(SIGUSR1, kill_thread_signal_handler);
+  while (send_heartbeat) {
+    usleep(wakup_local_param_config.heartbeat_timer_value * 100 *
+           TIMER_UNIT_MS_TO_US);
+
+    pthread_mutex_lock(&mtx_wakeup);
+
+    uint16_t opcode;
+    HC_BT_HDR* packet;
+    opcode = HCI_CMD_NXP_BLE_WAKEUP;
+    packet = make_command(opcode, HCI_CMD_NXP_SUB_OCF_SIZE);
+    if (packet) {
+      packet->data[3] = HCI_CMD_NXP_SUB_OCF_HEARTBEAT;
+      if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+        VNDDBG("wakeup %s send out command successfully \n", __func__);
+      }
+    } else {
+      VNDDBG("wakeup %s no valid packet \n", __func__);
+    }
+
+    while (heartbeat_event_received == false) {
+      pthread_cond_wait(&cond_wakeup, &mtx_wakeup);
+    }
+    heartbeat_event_received = false;
+    pthread_mutex_unlock(&mtx_wakeup);
+  }
+  return NULL;
+}
+
+/*******************************************************************************
+**
+** Function         set_wakeup_gpio_config
+**
+** Description      set configurations related to GPIO
+**
+** Returns          None
+**
+*******************************************************************************/
+static void set_wakeup_gpio_config(unsigned char pattern_index) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  opcode = HCI_CMD_NXP_BLE_WAKEUP;
+  packet = make_command(
+      opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_GPIO_CONFIG_SIZE);
+  if (packet) {
+    packet->data[3] = HCI_CMD_NXP_SUB_OCF_GPIO_CONFIG;
+    packet->data[4] = pattern_index;
+    packet->data[5] = wakeup_gpio_config[pattern_index].gpio_pin;
+    packet->data[6] = wakeup_gpio_config[pattern_index].high_duration;
+    packet->data[7] = wakeup_gpio_config[pattern_index].low_duration;
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      VNDDBG("wakeup %s send out command successfully, %d, %d, %d, %d,\n",
+             __func__, pattern_index,
+             wakeup_gpio_config[pattern_index].gpio_pin,
+             wakeup_gpio_config[pattern_index].high_duration,
+             wakeup_gpio_config[pattern_index].low_duration);
+      wakeup_gpio_config_state = pattern_index;
+    }
+  } else {
+    VNDDBG("wakeup %s no valid packet \n", __func__);
+  }
+}
+/*******************************************************************************
+**
+** Function         set_wakeup_adv_pattern
+**
+** Description      set specific advertising pattern for wakeup
+**
+** Returns          None
+**
+*******************************************************************************/
+static void set_wakeup_adv_pattern(void) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  opcode = HCI_CMD_NXP_BLE_WAKEUP;
+  packet = make_command(opcode, HCI_CMD_NXP_SUB_OCF_SIZE +
+                                    HCI_CMD_NXP_ADV_PATTERN_LENGTH_SIZE +
+                                    wakeup_adv_config.length);
+  if (packet) {
+    packet->data[3] = HCI_CMD_NXP_SUB_OCF_ADV_PATTERN_CONFIG;
+    packet->data[4] = wakeup_adv_config.length;
+    memcpy(&packet->data[5], &wakeup_adv_config.adv_pattern[0],
+           wakeup_adv_config.length);
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      VNDDBG(
+          "wakeup %s send out command successfully local, %d, %d, %d, %d, %d, "
+          "%d\n",
+          __func__, wakeup_adv_config.length, wakeup_adv_config.adv_pattern[0],
+          wakeup_adv_config.adv_pattern[1], wakeup_adv_config.adv_pattern[4],
+          wakeup_adv_config.adv_pattern[7], wakeup_adv_config.adv_pattern[8]);
+      VNDDBG(
+          "wakeup %s send out command successfully hci, %d, %d, %d, %d, %d, "
+          "%d\n",
+          __func__, packet->data[4], packet->data[5], packet->data[6],
+          packet->data[10], packet->data[12], packet->data[13]);
+    }
+  } else {
+    VNDDBG("wakeup %s no valid packet \n", __func__);
+  }
+}
+/*******************************************************************************
+**
+** Function         set_wakeup_scan_parameter
+**
+** Description      set scan parameter for wakeup LE scan
+**
+** Returns          None
+**
+*******************************************************************************/
+static void set_wakeup_scan_parameter(void) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  opcode = HCI_CMD_NXP_BLE_WAKEUP;
+  packet = make_command(
+      opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_SCAN_PARAM_CONFIG_SIZE);
+  if (packet) {
+    packet->data[3] = HCI_CMD_NXP_SUB_OCF_SCAN_PARAM_CONFIG;
+    packet->data[4] = wakeup_scan_param_config.le_scan_type;
+    packet->data[5] = (unsigned char)wakeup_scan_param_config.interval;
+    packet->data[6] = (unsigned char)(wakeup_scan_param_config.interval >> 8);
+    packet->data[7] = (unsigned char)wakeup_scan_param_config.window;
+    packet->data[8] = (unsigned char)(wakeup_scan_param_config.window >> 8);
+    packet->data[9] = wakeup_scan_param_config.own_addr_type;
+    packet->data[10] = wakeup_scan_param_config.scan_filter_policy;
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      VNDDBG("wakeup %s send out command successfully, %d, %d, %d, %d, %d\n",
+             __func__, wakeup_scan_param_config.le_scan_type,
+             (packet->data[5] | (packet->data[6] << 8)),
+             (packet->data[7] | (packet->data[8] << 8)),
+             wakeup_scan_param_config.own_addr_type,
+             wakeup_scan_param_config.scan_filter_policy);
+    }
+  } else {
+    VNDDBG("wakeup %s no valid packet \n", __func__);
+  }
+}
+/*******************************************************************************
+**
+** Function         set_wakeup_local_parameter
+**
+** Description      set parameter for local configuration
+**
+** Returns          None
+**
+*******************************************************************************/
+static void set_wakeup_local_parameter(void) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  opcode = HCI_CMD_NXP_BLE_WAKEUP;
+  packet = make_command(
+      opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_LOCAL_PARAM_CONFIG_SIZE);
+  if (packet) {
+    packet->data[3] = HCI_CMD_NXP_SUB_OCF_LOCAL_PARAM_CONFIG;
+    packet->data[4] = wakup_local_param_config.heartbeat_timer_value;
+    if (vnd_cb->xmit_cb(opcode, packet, hw_config_callback)) {
+      VNDDBG("wakeup %s send out command successfully, %d\n", __func__,
+             wakup_local_param_config.heartbeat_timer_value);
+    }
+  } else {
+    VNDDBG("wakeup %s no valid packet \n", __func__);
+  }
+}
+/*******************************************************************************
+**
+** Function         wakeup_event_handler
+**
+** Description      handle wakeup related hci event
+**
+** Returns          None
+**
+*******************************************************************************/
+static void wakeup_event_handler(uint8_t sub_ocf, uint8_t status) {
+  if (status == 0) {
+    switch (sub_ocf) {
+      case HCI_CMD_NXP_SUB_OCF_HEARTBEAT:
+        pthread_mutex_lock(&mtx_wakeup);
+        heartbeat_event_received = true;
+        pthread_cond_signal(&cond_wakeup);
+        pthread_mutex_unlock(&mtx_wakeup);
+        break;
+      case HCI_CMD_NXP_SUB_OCF_GPIO_CONFIG:
+        switch (wakeup_gpio_config_state) {
+          case wakeup_power_key:
+            set_wakeup_gpio_config(wakeup_netflix_key);
+            break;
+          case wakeup_netflix_key:
+            set_wakeup_adv_pattern();
+            break;
+          default:
+            break;
+        }
+        break;
+      case HCI_CMD_NXP_SUB_OCF_ADV_PATTERN_CONFIG:
+        set_wakeup_local_parameter();
+        break;
+      case HCI_CMD_NXP_SUB_OCF_SCAN_PARAM_CONFIG:
+        set_wakeup_gpio_config(wakeup_power_key);
+        break;
+      case HCI_CMD_NXP_SUB_OCF_LOCAL_PARAM_CONFIG:
+        vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+        pthread_create(&p_headtbeat, NULL, send_heartbeat_thread, NULL);
+        break;
+      default:
+        break;
+    }
+  } else {
+    vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
+  }
+  ALOGI("wakup sub_ocf:0x%04x\n", sub_ocf);
+}
+
+/******************************************************************************
+ **
+ ** Function:      wakeup_kill_heartbeat_thread
+ **
+ ** Description:   launch a signal to kill heartbeat thread when BT Off
+ **
+ ** Return Value:  NA
+ **
+ *****************************************************************************/
+void wakeup_kill_heartbeat_thread(void) {
+  int status = -1;
+  VNDDBG("Killing heartbeat thread");
+  if (send_heartbeat) {
+    status = pthread_kill(p_headtbeat, SIGUSR1);
+    send_heartbeat = FALSE;
+  }
+  VNDDBG("Killed heartbeat with status %d", status);
+}
+#endif
+
 /******************************************************************************
  **
  ** Function:      hw_bt_read_fw_revision

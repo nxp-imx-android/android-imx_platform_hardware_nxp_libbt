@@ -103,6 +103,8 @@ static BOOLEAN EntryPoint_Req = FALSE;
 static uint32 change_baudrata_buffer_len = 0;
 static uint32 cmd7_change_timeout_len = 0;
 static uint32 cmd5_len = 0;
+static BOOLEAN send_poke = TRUE;
+static uint8 m_Buffer_Poke[2] = {0xdc,0xe9};
 // CMD5 Header to change bootload baud rate
 uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                  0x2c, 0x00, 0x00, 0x00, 0x77, 0xdb, 0xfd, 0xe0};
@@ -382,9 +384,17 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
           break;
         }
       }
+      if (enable_poke_controller && send_poke &&
+          (!get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED))) {
+        fw_upload_ComWriteChars(mchar_fd, m_Buffer_Poke, 2);
+        VNDDBG("Poke Sent");
+        send_poke = FALSE;
+      }
+
       fw_upload_DelayInMs(1);
     }
   }
+  send_poke = FALSE;
   return bResult;
 }
 
@@ -1131,7 +1141,9 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
         uiBytesToSend = uiDataLen;
         uiFirstChunkSent = 0;
       } else if (uiLenToSend == uiDataLen) {
+#ifdef DEBUG_PRINT
         PRINT("Restart sending 2nd chunk...");
+#endif
         fw_upload_ComWriteChars(mchar_fd, (uint8*)&ucBuf[HDR_LEN], uiLenToSend);
         uiBytesToSend = HDR_LEN;
         uiFirstChunkSent = 1;
@@ -1559,7 +1571,7 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
         continue;
       } else if (uiLenToSend == HDR_LEN) {
         // Download CMD5 header and Payload packet.
-        tcflush(mchar_fd, TCIOFLUSH);
+        tcflush(mchar_fd, TCIFLUSH);
         memcpy(ucBuffer, m_Buffer_CMD5_Header, HDR_LEN);
         memcpy(ucBuffer + HDR_LEN, uartConfig, uiLen);
         fw_upload_SendBuffer(uiLenToSend, ucBuffer, TRUE);
@@ -1633,6 +1645,10 @@ static int32 fw_Change_Timeout()
   BOOLEAN bRetVal = FALSE;
   uint8 reTryNumber  = 0;
   fw_upload_gen_crc_table();
+
+  if (enable_poke_controller && (uiProVer == Ver3)) {
+    send_poke = TRUE;
+  }
 
   while (!bRetVal)
   {
@@ -1783,7 +1799,7 @@ int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
         break;
       }
     }
-    tcflush(mchar_fd, TCIOFLUSH);
+    tcflush(mchar_fd, TCIFLUSH);
     ret_value =
         fw_upload_SendBuffer(HDR_LEN, cmd5_data, !read_sig_hdr_after_cmd5);
     PRINT("CMD5 sent succesfully");
@@ -1991,7 +2007,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
         uiLenToSend = fw_upload_WaitFor_Len(pFile);
       }
       PRINT("Number of bytes to be downloaded: %8ld\r", ulTotalFileSize);
-      tcflush(mchar_fd, TCIOFLUSH);
+      tcflush(mchar_fd, TCIFLUSH);
       do {
         uiLenToSend = fw_upload_V1SendLenBytes(pFileBuffer, uiLenToSend);
       } while (uiLenToSend != 0);

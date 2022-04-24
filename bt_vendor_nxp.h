@@ -45,7 +45,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "008.018"
+#define BT_HAL_VERSION "009.002"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -75,25 +75,13 @@ typedef unsigned char BOOLEAN;
 
 #define NXP_WAKEUP_ADV_PATTERN_LENGTH 16  // company id + vendor information
 
+#define PROP_BLUETOOTH_OPENED "bluetooth.nxp.uart_configured"
+#define PROP_BLUETOOTH_FW_DOWNLOADED "bluetooth.nxp.fw_downloaded"
+#define PROP_BLUETOOTH_DELAY "bluetooth.nxp.fw_downloaded_delay"
+#define PROP_BLUETOOTH_INBAND_CONFIGURED "bluetooth.nxp.inband_ir_configured"
 /* Run-time configuration file */
 #ifndef VENDOR_LIB_CONF_FILE
 #define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"
-#endif
-
-#ifndef NXP_LOAD_BT_CALIBRATION_DATA
-#define NXP_LOAD_BT_CALIBRATION_DATA FALSE
-#endif
-
-#ifndef NXP_SET_BLE_TX_POWER_LEVEL
-#define NXP_SET_BLE_TX_POWER_LEVEL FALSE
-#endif
-
-#ifndef NXP_ENABLE_BT_TX_MAX_POWER
-#define NXP_ENABLE_BT_TX_MAX_POWER FALSE
-#endif
-
-#ifndef NXP_ENABLE_INDEPENDENT_RESET_VSC
-#define NXP_ENABLE_INDEPENDENT_RESET_VSC FALSE
 #endif
 
 #ifndef NXP_VND_DBG
@@ -160,6 +148,8 @@ extern uint8_t set_1m_2m_power;
 extern uint8_t bt_set_max_power;
 extern uint8_t independent_reset_mode;
 extern uint8_t independent_reset_gpio_pin;
+extern bool enable_sco_config;
+extern bool use_controller_addr;
 extern char pFilename_fw_init_config_bin[];
 #if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 extern wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num];
@@ -168,9 +158,14 @@ extern wakeup_scan_param_config_t wakeup_scan_param_config;
 extern wakeup_local_param_config_t wakup_local_param_config;
 void wakeup_kill_heartbeat_thread(void);
 #endif
+#ifdef UART_DOWNLOAD_FW
+extern uint8_t enable_poke_controller;
+#endif
 /*****************************************************************************
 **   Functions Prototype
 *****************************************************************************/
 void hw_config_start(void);
 int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl);
+int get_prop_int32(char* name);
+int set_prop_int32(char* name, int value);
 #endif

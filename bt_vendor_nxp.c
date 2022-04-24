@@ -59,16 +59,14 @@
 
 #define MBTCHAR_IOCTL_RELEASE _IO('M', 1)
 
-#define PROP_BLUETOOTH_OPENED "bluetooth.nxp.uart_configured"
-#define PROP_BLUETOOTH_FW_DOWNLOADED "bluetooth.nxp.fw_downloaded"
-#define PROP_BLUETOOTH_DELAY "bluetooth.nxp.fw_downloaded_delay"
-
 /*
  * Defines for wait for Bluetooth firmware ready Specify durations
  * between polls and max wait time
  */
 #define POLL_DRIVER_DURATION_US (100000)
 #define POLL_DRIVER_MAX_TIME_MS (20000)
+#define POLL_CONFIG_UART_MS (50)
+#define POLL_INBAND_COMMAND_MS (1)
 
 #define CONF_COMMENT '#'
 #define CONF_DELIMITERS " =\n\r\t"
@@ -93,18 +91,14 @@ static int uart_break_before_open = 0;
 static int32_t baudrate_fw_init = 115200;
 static int32_t baudrate_bt = 3000000;
 int write_bdaddrss = 0;
-#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
 int8_t ble_1m_power = 0;
 int8_t ble_2m_power = 0;
 uint8_t set_1m_2m_power = 0;
-#endif
-#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
 int8_t bt_max_power_sel = 0;
 uint8_t bt_set_max_power = 0;
-#endif
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 uint8_t independent_reset_gpio_pin = 0xFF;
-#endif
+bool enable_sco_config = TRUE;
+bool use_controller_addr = TRUE;
 uint8_t ir_host_gpio_pin = 14;
 static char chrdev_name[32] = "/dev/gpiochip5";
 /* 0:disable IR(default); 1:OOB IR(FW Config); 2:Inband IR;*/
@@ -122,7 +116,6 @@ uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0x00, /* 2nd */
     0x00  /* 1st */
 };
-
 #ifdef UART_DOWNLOAD_FW
 int uart_break_before_change_baudrate = 0;
 static int enable_download_fw = 0;
@@ -136,17 +129,13 @@ static char pFileName_helper[MAX_PATH_LEN] =
 static char pFileName_image[MAX_PATH_LEN] =
     "/vendor/firmware/uart8997_bt_v4.bin";
 static int32_t iSecondBaudrate = 0;
-
+uint8_t enable_poke_controller = 0;
 #endif
-#if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
 char pFilename_cal_data[MAX_PATH_LEN];
-#endif
 static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
 static int rfkill_id = -1;
 static char* rfkill_state_path = NULL;
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 int last_baudrate = 0;
-#endif
 #if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num] = {
     {.gpio_pin = 13, .high_duration = 2, .low_duration = 2},
@@ -172,6 +161,20 @@ typedef struct {
   conf_action_t* p_action;
   int param;
 } conf_entry_t;
+
+static int set_enable_sco_config(char* p_conf_name, char* p_conf_value, int param){
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  enable_sco_config = (atoi(p_conf_value) == 0)? FALSE:TRUE;
+  return 0;
+}
+
+static int set_use_controller_addr(char* p_conf_name, char* p_conf_value, int param){
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  use_controller_addr = (atoi(p_conf_value) == 0)? FALSE:TRUE;
+  return 0;
+}
 
 static int set_mchar_port(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
@@ -218,7 +221,6 @@ static int set_baudrate_fw_init(char* p_conf_name, char* p_conf_value,
   baudrate_fw_init = atoi(p_conf_value);
   return 0;
 }
-#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
 static int set_ble_1m_power(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
@@ -234,9 +236,6 @@ static int set_ble_2m_power(char* p_conf_name, char* p_conf_value, int param) {
   set_1m_2m_power |= BLE_SET_2M_POWER;
   return 0;
 }
-#endif
-
-#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
 static int set_bt_tx_power(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
@@ -244,7 +243,6 @@ static int set_bt_tx_power(char* p_conf_name, char* p_conf_value, int param) {
   bt_set_max_power = 1;
   return 0;
 }
-#endif
 
 static int set_pFilename_fw_init_config_bin(char* p_conf_name,
                                             char* p_conf_value, int param) {
@@ -269,7 +267,6 @@ static int set_send_oob_ir_trigger(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 static int set_independent_reset_gpio_pin(char* p_conf_name, char* p_conf_value,
                                           int param) {
   UNUSED(p_conf_name);
@@ -277,7 +274,7 @@ static int set_independent_reset_gpio_pin(char* p_conf_name, char* p_conf_value,
   independent_reset_gpio_pin = atoi(p_conf_value);
   return 0;
 }
-#endif
+
 static int set_oob_ir_host_gpio_pin(char* p_conf_name, char* p_conf_value,
                                     int param) {
   UNUSED(p_conf_name);
@@ -291,6 +288,7 @@ static int set_charddev_name(char* p_conf_name, char* p_conf_value, int param) {
   strcpy(chrdev_name, p_conf_value);
   return 0;
 }
+
 static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
                               int param) {
   UNUSED(p_conf_name);
@@ -398,8 +396,16 @@ static int set_uart_sleep_after_dl(char* p_conf_name, char* p_conf_value,
   uart_sleep_after_dl = atoi(p_conf_value);
   return 0;
 }
+
+static int set_enable_poke_controller(char* p_conf_name, char* p_conf_value,
+                                      int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  enable_poke_controller = atoi(p_conf_value);
+  return 0;
+}
 #endif
-#if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
+
 static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
                                  int param) {
   UNUSED(p_conf_name);
@@ -407,7 +413,7 @@ static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
   strcpy(pFilename_cal_data, p_conf_value);
   return 0;
 }
-#endif
+
 #if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 static int set_powerkey_gpio_pin(char* p_conf_name, char* p_conf_value,
                                  int param) {
@@ -541,16 +547,10 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_fw_init", set_baudrate_fw_init, 0},
     {"bd_address", set_bd_address_buf, 0},
     {"pFilename_fw_init_config_bin", set_pFilename_fw_init_config_bin, 0},
-#if (NXP_SET_BLE_TX_POWER_LEVEL == TRUE)
     {"ble_1m_power", set_ble_1m_power, 0},
     {"ble_2m_power", set_ble_2m_power, 0},
-#endif
-#if (NXP_ENABLE_BT_TX_MAX_POWER == TRUE)
     {"bt_max_power_sel", set_bt_tx_power, 0},
-#endif
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
     {"independent_reset_gpio_pin", set_independent_reset_gpio_pin, 0},
-#endif
     {"oob_ir_host_gpio_pin", set_oob_ir_host_gpio_pin, 0},
     {"chardev_name", set_charddev_name, 0},
     {"independent_reset_mode", set_independent_reset_mode, 0},
@@ -566,10 +566,11 @@ static const conf_entry_t conf_table[] = {
     {"baudrate_dl_image", set_baudrate_dl_image, 0},
     {"iSecondBaudrate", set_iSecondBaudrate, 0},
     {"uart_sleep_after_dl", set_uart_sleep_after_dl, 0},
+    {"enable_poke_controller", set_enable_poke_controller, 0},
 #endif
-#if (NXP_LOAD_BT_CALIBRATION_DATA == TRUE)
     {"pFilename_cal_data", set_Filename_cal_data, 0},
-#endif
+    {"enable_sco_config", set_enable_sco_config, 0},
+    {"use_controller_addr", set_use_controller_addr, 0},
 #if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
     {"wakeup_power_gpio_pin", set_powerkey_gpio_pin, 0},
     {"wakeup_power_gpio_high_duration", set_powerkey_gpio_high_duration, 0},
@@ -673,7 +674,8 @@ static int set_speed(int fd, struct termios* ti, int speed) {
  *
  *****************************************************************************/
 
-static int read_hci_event(int fd, unsigned char* buf, int size) {
+static int read_hci_event(int fd, unsigned char* buf, int size,
+                          int retry_delay_ms) {
   int remain, r;
   int count = 0;
   int k = 0;
@@ -688,7 +690,7 @@ static int read_hci_event(int fd, unsigned char* buf, int size) {
     if (r <= 0) {
       VNDDBG("read hci event 0x04 failed, retry\n");
       k++;
-      usleep(50 * 1000);
+      usleep(retry_delay_ms * 1000);
       continue;
     }
     if (buf[0] == 0x04) break;
@@ -730,7 +732,7 @@ static int read_hci_event(int fd, unsigned char* buf, int size) {
   return count;
 }
 
-static int set_prop_int32(char* name, int value) {
+int set_prop_int32(char* name, int value) {
   char init_value[PROPERTY_VALUE_MAX];
   int ret;
 
@@ -742,7 +744,7 @@ static int set_prop_int32(char* name, int value) {
   return ret;
 }
 
-static int get_prop_int32(char* name) {
+int get_prop_int32(char* name) {
   int ret;
 
   ret = property_get_int32(name, -1);
@@ -797,7 +799,6 @@ static int32 uart_speed(int32 s) {
       return B0;
   }
 }
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
 /******************************************************************************
  **
  ** Function:        uart_speed_translate
@@ -858,7 +859,6 @@ static int32 uart_get_speed(struct termios* ti) {
   speed = (int32)cfgetospeed(ti);
   return (uart_speed_translate(speed));
 }
-#endif
 /******************************************************************************
  *
  ** Function            uart_set_speed
@@ -927,10 +927,10 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
     return -1;
   }
   tcflush(fd, TCIOFLUSH);
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
-  last_baudrate = uart_get_speed(&ti);
-  VNDDBG("Last buad rate = %d", last_baudrate);
-#endif
+  if (independent_reset_mode == IR_MODE_INBAND_VSC) {
+    last_baudrate = uart_get_speed(&ti);
+    VNDDBG("Last buad rate = %d", last_baudrate);
+  }
   /* Set actual baudrate */
   if (uart_set_speed(fd, &ti, dwBaudRate) < 0) {
     VNDDBG("Can't set baud rate");
@@ -1097,7 +1097,8 @@ static int config_uart() {
       return -1;
     }
 
-    if ((resp_size = read_hci_event(mchar_fd, resp, 10)) < 0 ||
+    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS)) <
+            0 ||
         memcmp(resp, resp_cmp_reset, 7)) {
       VNDDBG("Failed to read HCI RESET CMD response! \n");
       return -1;
@@ -1124,7 +1125,8 @@ static int config_uart() {
 
     VNDDBG("start read hci event\n");
     memset(resp, 0x00, 10);
-    if ((resp_size = read_hci_event(mchar_fd, resp, 100)) < 0 ||
+    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS)) <
+            0 ||
         memcmp(resp, resp_cmp, 7)) {
       VNDDBG("Failed to read set baud rate command response! \n");
       return -1;
@@ -1301,6 +1303,64 @@ void bt_vnd_gpio_configuration(int value) {
   }
 }
 
+/*******************************************************************************
+**
+** Function        bt_vnd_send_inband_ir
+**
+** Description     Send Inband Independent Reset to Controller.
+**
+** Returns         0 : Success
+**                 Otherwise : Fail
+**
+*******************************************************************************/
+static int bt_vnd_send_inband_ir(int32_t baudrate) {
+  int cmd_resp_len = 0;
+  unsigned char inband_reset_cmd[] = {0x01, 0xFC, 0xFC, 0x00};
+  unsigned char inband_reset_resp[] = {
+      0x04, 0x0E, 0x04, 0x01, 0xFC, 0xFC, 0x00};
+  unsigned char hci_resp[sizeof(inband_reset_resp)];
+  if (get_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED) == 1) {
+    if (last_baudrate != baudrate) {
+      if (uart_set_speed(mchar_fd, &ti, last_baudrate) < 0) {
+        VNDDBG("Can't set last baud rate %d\n", last_baudrate);
+        close(mchar_fd);
+        return -1;
+      } else {
+        VNDDBG("Baud rate changed from %d to %d\n", baudrate, last_baudrate);
+      }
+    }
+    cmd_resp_len = sizeof(inband_reset_cmd);
+    tcflush(mchar_fd, TCIOFLUSH);
+    if (write(mchar_fd, inband_reset_cmd, cmd_resp_len) != cmd_resp_len) {
+      VNDDBG("Failed to write in-band reset command \n");
+      return -1;
+    } else {
+      VNDDBG("start read hci event\n");
+      cmd_resp_len = sizeof(inband_reset_resp);
+      memset(hci_resp, 0x00, cmd_resp_len);
+      if ((cmd_resp_len !=
+           read_hci_event(mchar_fd, hci_resp, cmd_resp_len,
+                          POLL_INBAND_COMMAND_MS)) ||
+          memcmp(hci_resp, inband_reset_resp, cmd_resp_len) !=
+              0) {
+        VNDDBG("Failed to read Inband reset response");
+        return -1;
+      }
+      VNDDBG("=========Inband IR trigger sent succesfully=======");
+    }
+    if (last_baudrate != baudrate) {
+      if (uart_set_speed(mchar_fd, &ti, baudrate) < 0) {
+        VNDDBG("Can't set last baud rate %d\n", baudrate);
+        close(mchar_fd);
+        return -1;
+      } else {
+        VNDDBG("Baud rate changed from %d to %d\n", last_baudrate, baudrate);
+      }
+    }
+  }
+  return 0;
+}
+
 /*****************************************************************************
 **
 **   BLUETOOTH VENDOR INTERFACE LIBRARY FUNCTIONS
@@ -1348,13 +1408,11 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         }
       } else if (*state == BT_VND_PWR_ON) {
         VNDDBG("power on --------------------------------------\n");
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
         if (independent_reset_mode == IR_MODE_INBAND_VSC) {
           VNDDBG("Reset the download status for Inband IR \n");
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
           set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
         }
-#endif
         adapterState = BT_VND_PWR_ON;
         if (send_oob_ir_trigger == IR_TRIGGER_RFKILL) {
           bt_vnd_set_bluetooth_power(FALSE);
@@ -1392,10 +1450,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       int bluetooth_opened;
       int num = 0;
       int32_t baudrate = 0;
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
-      unsigned char inband_reset_cmd[4] = {0x01, 0xfc, 0xfc, 0x00};
-      int cmd_len = 0;
-#endif
       if (is_uart_port) {
         VNDDBG("baudrate_bt %d\n", baudrate_bt);
         VNDDBG("baudrate_fw_init %d\n", baudrate_fw_init);
@@ -1442,39 +1496,12 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           baudrate = baudrate_fw_init;
 #endif
           mchar_fd = uart_init_open(mchar_port, baudrate, 0);
-#if (NXP_ENABLE_INDEPENDENT_RESET_VSC == TRUE)
           if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&
               (mchar_fd > 0)) {
-            if (last_baudrate != baudrate) {
-              if (uart_set_speed(mchar_fd, &ti, last_baudrate) < 0) {
-                VNDDBG("Can't set last baud rate %d\n", last_baudrate);
-                close(mchar_fd);
-                return -1;
-              } else {
-                VNDDBG("Baud rate changed from %d to %d\n", baudrate,
-                       last_baudrate);
-              }
-            }
-            cmd_len = sizeof(inband_reset_cmd);
-            tcflush(mchar_fd, TCIOFLUSH);
-            if (write(mchar_fd, inband_reset_cmd, cmd_len) != cmd_len) {
-              VNDDBG("Failed to write in-band reset command \n");
+            if (bt_vnd_send_inband_ir(baudrate) != 0) {
               return -1;
-            } else {
-              VNDDBG("=========Inband IR trigger sent succesfully=======");
-            }
-            if (last_baudrate != baudrate) {
-              if (uart_set_speed(mchar_fd, &ti, baudrate) < 0) {
-                VNDDBG("Can't set last baud rate %d\n", baudrate);
-                close(mchar_fd);
-                return -1;
-              } else {
-                VNDDBG("Baud rate changed from %d to %d\n", last_baudrate,
-                       baudrate);
-              }
             }
           }
-#endif
         }
         if (mchar_fd > 0)
           VNDDBG("open uart port successfully, fd=%d, mchar_port=%s\n",

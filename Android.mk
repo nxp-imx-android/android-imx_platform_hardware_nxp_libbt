@@ -28,7 +28,7 @@ include $(CLEAR_VARS)
 ifeq ($(shell expr $(PLATFORM_VERSION) "==" Tiramisu),1)
 BDROID_DIR := $(TOP_DIR)packages/modules/Bluetooth/system
 else
-ifeq ($(shell expr $(PLATFORM_SDK_VERSION) "<=" 31),1)
+ifeq ($(shell expr $(PLATFORM_SDK_VERSION) "<=" 32),1)
 BDROID_DIR := $(TOP_DIR)system/bt
 else
 BDROID_DIR := $(TOP_DIR)packages/modules/Bluetooth/system

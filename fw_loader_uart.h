@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2009-2020 NXP
+ *  Copyright 2009-2022 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -43,4 +43,5 @@ extern uint8_t independent_reset_mode;
 void init_crc8();
 BOOLEAN bt_vnd_mrvl_check_fw_status();
 int bt_vnd_mrvl_download_fw(int8 *pPortName, int32 iBaudRate, int8 *pFileName, int32 iSecondBaudRate);
+void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size);
 #endif  // _FW_LOADER_H

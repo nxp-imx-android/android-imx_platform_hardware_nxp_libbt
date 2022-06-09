@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2018-2021 NXP
+ *  Copyright 2018-2022 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "009.002"
+#define BT_HAL_VERSION "009.005"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -56,6 +56,7 @@ typedef unsigned char BOOLEAN;
 #define FALSE 0
 #define WRITE_BD_ADDRESS_SIZE 8
 #define MAX_PATH_LEN 512
+#define MAX_FILE_LEN 128
 #define DOWNLOAD_SUCCESS 0x0
 #define OPEN_SERIAL_PORT_OR_FILE_ERROR 0x1
 #define FEEK_SEEK_ERROR 0x2
@@ -88,10 +89,6 @@ typedef unsigned char BOOLEAN;
 #define NXP_VND_DBG FALSE
 #endif
 
-#ifndef NXP_HEARTBEAT_FEATURE_SUPPORT
-#define NXP_HEARTBEAT_FEATURE_SUPPORT FALSE
-#endif
-
 #if (NXP_VND_DBG == TRUE)
 #define VNDDBG(fmt, ...) \
   ALOGD("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
@@ -104,8 +101,6 @@ typedef unsigned char BOOLEAN;
 ******************************************************************************/
 enum { IR_TRIGGER_NONE, IR_TRIGGER_RFKILL, IR_TRIGGER_GPIO };
 enum { IR_MODE_NONE, IR_MODE_OOB_VSC, IR_MODE_INBAND_VSC };
-
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 enum { wakeup_power_key, wakeup_netflix_key, wakeup_key_num };
 
 typedef struct {
@@ -130,7 +125,6 @@ typedef struct {
 typedef struct {
   unsigned char heartbeat_timer_value;  // 100ms
 } wakeup_local_param_config_t;
-#endif
 
 /***********************************************************
  *  Externs
@@ -151,13 +145,12 @@ extern uint8_t independent_reset_gpio_pin;
 extern bool enable_sco_config;
 extern bool use_controller_addr;
 extern char pFilename_fw_init_config_bin[];
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+extern bool enable_heartbeat_config;
 extern wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num];
 extern wakeup_adv_pattern_config_t wakeup_adv_config;
 extern wakeup_scan_param_config_t wakeup_scan_param_config;
 extern wakeup_local_param_config_t wakup_local_param_config;
 void wakeup_kill_heartbeat_thread(void);
-#endif
 #ifdef UART_DOWNLOAD_FW
 extern uint8_t enable_poke_controller;
 #endif

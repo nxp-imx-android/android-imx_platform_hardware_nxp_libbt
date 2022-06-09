@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2012-2013, 2020-2021 NXP
+ *  Copyright 2012-2013, 2020-2022 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 
 #include "bt_hci_bdroid.h"
 #include "bt_vendor_nxp.h"
+#include "fw_loader_io.h"
 
 /******************************************************************************
 **  Constants & Macros
@@ -103,7 +104,6 @@
 /*Move to next configuration in the sequence*/
 #define hw_config_next() hw_config_seq(NULL)
 
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 #define HCI_CMD_NXP_BLE_WAKEUP 0xFD52
 #define HCI_CMD_NXP_SUB_OCF_HEARTBEAT 0x00
 #define HCI_CMD_NXP_SUB_OCF_GPIO_CONFIG 0x01
@@ -116,7 +116,6 @@
 #define HCI_CMD_NXP_SCAN_PARAM_CONFIG_SIZE 7
 #define HCI_CMD_NXP_LOCAL_PARAM_CONFIG_SIZE 1
 #define TIMER_UNIT_MS_TO_US 1000
-#endif
 
 /******************************************************************************
 **  Local type definitions
@@ -142,14 +141,12 @@ static int8 hw_config_read_bdaddr(void);
 static int8 hw_bt_cal_data_load(void);
 static int8 hw_ble_set_power_level(void);
 static int8 hw_bt_enable_max_power_level_cmd(void);
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 static int8 set_wakeup_scan_parameter(void);
 static int8 set_wakeup_adv_pattern(void);
 static int8 set_wakeup_local_parameter(void);
 static int8 set_wakeup_gpio_config(void);
 static void* send_heartbeat_thread(void* data);
 static void wakeup_event_handler(uint8_t sub_ocf);
-#endif
 /***********************************************************
  *  Local variables
  ***********************************************************
@@ -175,12 +172,10 @@ static hw_config_fun_ptr hw_config_seq_arr[] = {
     hw_config_read_bdaddr, /*Note:hw_config_read_bdaddr shall precede
                               hw_config_set_bdaddr*/
     hw_config_set_bdaddr,
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
     set_wakeup_scan_parameter,
     set_wakeup_gpio_config,
     set_wakeup_adv_pattern,
     set_wakeup_local_parameter,
-#endif
     hw_sco_config};
 
 /*Write_Voice_Setting - Use Linear Input coding, uLaw Air coding, 16bit sample
@@ -197,7 +192,6 @@ static uint8_t write_pcm_link_settings[WRITE_PCM_LINK_SETTINGS_SIZE] = {0x04,
 /** PCM LINK settings, SCO slot1 */
 static uint8_t set_sco_data_path[SET_SCO_DATA_PATH_SIZE] = {0x01};
 
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 static pthread_mutex_t mtx_wakeup = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cond_wakeup = PTHREAD_COND_INITIALIZER;
 static pthread_t p_headtbeat;
@@ -205,8 +199,6 @@ static bool heartbeat_event_received = false;
 static unsigned char wakeup_gpio_config_state = wakeup_key_num;
 static bool send_heartbeat = FALSE;
 static uint8_t wake_gpio_config = 0;
-static bool config_wakeup_setting = TRUE;
-#endif
 
 /***********************************************************
 **  HELPER FUNCTIONS
@@ -239,10 +231,8 @@ static char* cmd_to_str(uint16_t cmd) {
       return "hw_config_read_bdaddr";
     case HCI_CMD_NXP_WRITE_BD_ADDRESS:
       return "write_bd_address";
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
     case HCI_CMD_NXP_BLE_WAKEUP:
       return "ble_wake_config";
-#endif
     default:
       break;
   }
@@ -520,15 +510,13 @@ static void hw_config_process_packet(void* packet) {
             set_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED, 1);
           }
         }
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
         case HCI_CMD_NXP_BLE_WAKEUP: {
           if (status != 0) {
-            config_wakeup_setting = FALSE;
+            enable_heartbeat_config = FALSE;
           }
           wakeup_event_handler(stream[opcode_offset + 3]);
           break;
         }
-#endif
       }
     }
   } else {
@@ -562,11 +550,9 @@ static void hw_config_seq(void* packet) {
     VNDDBG("FW config completed!");
     if (vnd_cb) {
       vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
-      if (config_wakeup_setting) {
+      if (enable_heartbeat_config == TRUE) {
         pthread_create(&p_headtbeat, NULL, send_heartbeat_thread, NULL);
       }
-#endif
     } else {
       VNDDBG("Invalid HW config sequence");
     }
@@ -658,10 +644,9 @@ void hw_config_start(void) {
   hw_config.skip_seq_incr = 0;
   hw_config.size = sizeof(hw_config_seq_arr) / sizeof(hw_config_seq_arr[0]);
   hw_config.seq_arr = hw_config_seq_arr;
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
-  wake_gpio_config = 0;
-  config_wakeup_setting = TRUE;
-#endif
+  if (enable_heartbeat_config == TRUE) {
+    wake_gpio_config = 0;
+  }
   hw_config_seq(NULL);
   
 }
@@ -867,7 +852,7 @@ static int8 hw_bt_enable_independent_reset(void) {
   }
   return ret;
 }
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+
 /*******************************************************************************
 **
 ** Function         kill_thread_signal_handler
@@ -899,11 +884,9 @@ static void* send_heartbeat_thread(void* data) {
   
   send_heartbeat = TRUE;
   ALOGI("Starting Heartbeat Thread");
-  usleep(100000);
   signal(SIGUSR1, kill_thread_signal_handler);
   while (send_heartbeat) {
-    usleep(wakup_local_param_config.heartbeat_timer_value * 100 *
-           TIMER_UNIT_MS_TO_US);
+    fw_upload_DelayInMs(wakup_local_param_config.heartbeat_timer_value * 100);
     pthread_mutex_lock(&mtx_wakeup);
     packet = make_command(opcode, HCI_CMD_NXP_SUB_OCF_SIZE);
     if (packet) {
@@ -932,7 +915,7 @@ static int8 set_wakeup_gpio_config(void) {
   uint16_t opcode;
   int8 ret = -1;
   HC_BT_HDR* packet;
-  if (config_wakeup_setting) {
+  if (enable_heartbeat_config == TRUE) {
     opcode = HCI_CMD_NXP_BLE_WAKEUP;
     packet = make_command(
         opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_GPIO_CONFIG_SIZE);
@@ -942,7 +925,7 @@ static int8 set_wakeup_gpio_config(void) {
       packet->data[5] = wakeup_gpio_config[wake_gpio_config].gpio_pin;
       packet->data[6] = wakeup_gpio_config[wake_gpio_config].high_duration;
       packet->data[7] = wakeup_gpio_config[wake_gpio_config].low_duration;
-      VNDDBG("wakeup %s send out command successfully, %d, %d, %d, %d,\n",
+      ALOGI("wakeup %s send out command successfully, %d, %d, %d, %d,\n",
              __func__, wake_gpio_config,
              wakeup_gpio_config[wake_gpio_config].gpio_pin,
              wakeup_gpio_config[wake_gpio_config].high_duration,
@@ -968,7 +951,7 @@ static int8  set_wakeup_adv_pattern(void) {
   uint16_t opcode;
   int8 ret = -1;
   HC_BT_HDR* packet;
-  if (config_wakeup_setting) {
+  if (enable_heartbeat_config == TRUE) {
     opcode = HCI_CMD_NXP_BLE_WAKEUP;
     packet = make_command(opcode, HCI_CMD_NXP_SUB_OCF_SIZE +
                                       HCI_CMD_NXP_ADV_PATTERN_LENGTH_SIZE +
@@ -978,13 +961,13 @@ static int8  set_wakeup_adv_pattern(void) {
       packet->data[4] = wakeup_adv_config.length;
       memcpy(&packet->data[5], &wakeup_adv_config.adv_pattern[0],
              wakeup_adv_config.length);
-      VNDDBG(
+      ALOGI(
           "wakeup %s send out command successfully local, %d, %d, %d, %d, %d, "
           "%d\n",
           __func__, wakeup_adv_config.length, wakeup_adv_config.adv_pattern[0],
           wakeup_adv_config.adv_pattern[1], wakeup_adv_config.adv_pattern[4],
           wakeup_adv_config.adv_pattern[7], wakeup_adv_config.adv_pattern[8]);
-      VNDDBG(
+      ALOGI(
           "wakeup %s send out command successfully hci, %d, %d, %d, %d, %d, "
           "%d\n",
           __func__, packet->data[4], packet->data[5], packet->data[6],
@@ -1007,7 +990,7 @@ static int8 set_wakeup_scan_parameter(void) {
   uint16_t opcode;
   int8 ret = -1;
   HC_BT_HDR* packet;
-  if (config_wakeup_setting) {
+  if (enable_heartbeat_config == TRUE) {
     opcode = HCI_CMD_NXP_BLE_WAKEUP;
     packet = make_command(
         opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_SCAN_PARAM_CONFIG_SIZE);
@@ -1020,7 +1003,7 @@ static int8 set_wakeup_scan_parameter(void) {
       packet->data[8] = (unsigned char)(wakeup_scan_param_config.window >> 8);
       packet->data[9] = wakeup_scan_param_config.own_addr_type;
       packet->data[10] = wakeup_scan_param_config.scan_filter_policy;
-      VNDDBG("wakeup %s send out paramter, %d, %d, %d, %d, %d\n", __func__,
+      ALOGI("wakeup %s send out paramter, %d, %d, %d, %d, %d\n", __func__,
              wakeup_scan_param_config.le_scan_type,
              (packet->data[5] | (packet->data[6] << 8)),
              (packet->data[7] | (packet->data[8] << 8)),
@@ -1043,7 +1026,7 @@ static int8 set_wakeup_scan_parameter(void) {
 static int8 set_wakeup_local_parameter(void) {
   uint16_t opcode;
   int ret = -1;
-  if (config_wakeup_setting) {
+  if (enable_heartbeat_config == TRUE) {
     HC_BT_HDR* packet;
     opcode = HCI_CMD_NXP_BLE_WAKEUP;
     packet = make_command(
@@ -1098,10 +1081,10 @@ void wakeup_kill_heartbeat_thread(void) {
   if (send_heartbeat) {
     send_heartbeat = FALSE;
     status = pthread_kill(p_headtbeat, SIGUSR1);
+    fw_upload_DelayInMs(10);
   }
   VNDDBG("Killed heartbeat with status %d", status);
 }
-#endif
 
 /******************************************************************************
  **

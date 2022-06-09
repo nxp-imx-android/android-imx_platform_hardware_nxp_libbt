@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2009-2021 NXP
+ *  Copyright 2009-2022 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,9 +24,11 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/select.h>
 
 #define LOG_TAG "fw_loader"
+#define FW_DEFAULT_PATH "/vendor/firmware/"
 #include <log/log.h>
 #include <cutils/properties.h>
 #define printf(fmt, ...) ALOGI("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
@@ -104,6 +106,7 @@ static uint32 change_baudrata_buffer_len = 0;
 static uint32 cmd7_change_timeout_len = 0;
 static uint32 cmd5_len = 0;
 static BOOLEAN send_poke = TRUE;
+static uint16 chip_id = 0;
 static uint8 m_Buffer_Poke[2] = {0xdc,0xe9};
 // CMD5 Header to change bootload baud rate
 uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -151,6 +154,25 @@ typedef enum {
   Ver2,
   Ver3,
 } Version;
+
+typedef struct {
+  uint16_t soc_id;
+  char default_fw_name[MAX_FILE_LEN];
+} soc_fw_name_dict_t;
+
+typedef enum {
+  NXP_CHIPID_9098_A1 = 0x5C02,
+  NXP_CHIPID_9098_A2 = 0x5C03,
+  NXP_CHIPID_9177_A0 = 0x7600,
+  NXP_CHIPID_9177_A1 = 0x7601
+} NXP_CHIPID;
+
+soc_fw_name_dict_t soc_fw_name_dict[] = {
+    {NXP_CHIPID_9098_A1, "uart9098_bt_v1.bin"},
+    {NXP_CHIPID_9098_A2, "uart9098_bt_v1.bin"},
+    {NXP_CHIPID_9177_A0, "uartspi_n61x.bin"},
+    {NXP_CHIPID_9177_A1, "uartspi_n61x_v1.bin"}
+};
 
 uint8 uiErrCnt[16] = {0};
 static jmp_buf resync;  // Protocol restart buffer used in timeout cases.
@@ -369,6 +391,14 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
         uiProVer = Ver1;
       } else {
           uiProVer = Ver3;
+          if (V3_START_INDICATION) {
+            while (fw_upload_GetBufferSize(mchar_fd) < 2) {
+              usleep(1000);
+            };
+            chip_id = (fw_upload_ComReadChar(mchar_fd) |
+                       (fw_upload_ComReadChar(mchar_fd) << 8));
+            VNDDBG("Chip ID: 0x%x ", chip_id);
+          }
         }
       bVerChecked = TRUE;
     }
@@ -1805,6 +1835,32 @@ int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
     PRINT("CMD5 sent succesfully");
   }
   return ret_value;
+}
+/******************************************************************************
+ *
+ * Function:      fw_loader_get_default_fw_name
+ *
+ * Description:   Incase bootcode version 3 is used get default FW Path.
+ *
+ * Arguments:
+ * fw_name : Pointer to Firmware Path array.
+ * fw_name_size: Size of fw_name.
+ *
+ * Return Value: NA
+ *****************************************************************************/
+void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size) {
+  if (uiProVer == Ver3) {
+    int size_of_array = sizeof(soc_fw_name_dict) / sizeof(soc_fw_name_dict[0]);
+    for (int i = 0; i < size_of_array; i++) {
+      if (soc_fw_name_dict[i].soc_id == chip_id) {
+        memset(fw_name, 0, fw_name_size);
+        strcpy(fw_name, FW_DEFAULT_PATH);
+        strcat(fw_name, soc_fw_name_dict[i].default_fw_name);
+        VNDDBG("Default Firmware selected= %s", fw_name);
+        break;
+      }
+    }
+  }
 }
 #if (UART_DOWNLOAD_FW == TRUE)
 /******************************************************************************

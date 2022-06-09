@@ -1,7 +1,7 @@
 /******************************************************************************
  *  Copyright 2012 The Android Open Source Project
  *  Portions copyright (C) 2009-2012 Broadcom Corporation
- *  Portions copyright 2012-2013, 2015, 2018-2021 NXP
+ *  Portions copyright 2012-2013, 2015, 2018-2022 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -105,6 +105,7 @@ static char chrdev_name[32] = "/dev/gpiochip5";
 uint8_t independent_reset_mode = IR_MODE_NONE;
 /* 0:disable OOB IR Trigger; 1:RFKILL Trigger; 2:GPIO Trigger;*/
 uint8_t send_oob_ir_trigger = IR_TRIGGER_NONE;
+bool enable_heartbeat_config = FALSE;
 char pFilename_fw_init_config_bin[MAX_PATH_LEN];
 uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0xFE, /* Parameter ID */
@@ -122,6 +123,7 @@ static int enable_download_fw = 0;
 static int uart_break_after_dl_helper = 0;
 static int uart_sleep_after_dl = 100;
 static int download_helper = 0;
+static bool auto_select_fw_name = TRUE;
 static int32_t baudrate_dl_helper = 115200;
 static int32_t baudrate_dl_image = 3000000;
 static char pFileName_helper[MAX_PATH_LEN] =
@@ -136,7 +138,6 @@ static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
 static int rfkill_id = -1;
 static char* rfkill_state_path = NULL;
 int last_baudrate = 0;
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
 wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num] = {
     {.gpio_pin = 13, .high_duration = 2, .low_duration = 2},
     {.gpio_pin = 13, .high_duration = 4, .low_duration = 4}};
@@ -148,7 +149,6 @@ wakeup_scan_param_config_t wakeup_scan_param_config = {.le_scan_type = 0,
                                                        .scan_filter_policy = 0};
 wakeup_local_param_config_t wakup_local_param_config = {.heartbeat_timer_value =
                                                             8};
-#endif
 /*****************************************************************************
 **
 **   HELPER FUNCTIONS
@@ -162,17 +162,19 @@ typedef struct {
   int param;
 } conf_entry_t;
 
-static int set_enable_sco_config(char* p_conf_name, char* p_conf_value, int param){
+static int set_enable_sco_config(char* p_conf_name, char* p_conf_value,
+                                 int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
-  enable_sco_config = (atoi(p_conf_value) == 0)? FALSE:TRUE;
+  enable_sco_config = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
   return 0;
 }
 
-static int set_use_controller_addr(char* p_conf_name, char* p_conf_value, int param){
+static int set_use_controller_addr(char* p_conf_name, char* p_conf_value,
+                                   int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
-  use_controller_addr = (atoi(p_conf_value) == 0)? FALSE:TRUE;
+  use_controller_addr = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
   return 0;
 }
 
@@ -353,6 +355,7 @@ static int set_pFileName_image(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
   strcpy(pFileName_image, p_conf_value);
+  auto_select_fw_name = FALSE;
   return 0;
 }
 
@@ -414,7 +417,14 @@ static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+static int set_enable_heartbeat_config(char* p_conf_name, char* p_conf_value,
+                                       int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  enable_heartbeat_config = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
+  return 0;
+}
+
 static int set_powerkey_gpio_pin(char* p_conf_name, char* p_conf_value,
                                  int param) {
   UNUSED(p_conf_name);
@@ -533,7 +543,7 @@ static int set_wakeup_local_heartbeat_timer_value(char* p_conf_name,
       (unsigned char)atoi(p_conf_value);
   return 0;
 }
-#endif
+
 /*
  * Current supported entries and corresponding action functions
  */
@@ -571,7 +581,7 @@ static const conf_entry_t conf_table[] = {
     {"pFilename_cal_data", set_Filename_cal_data, 0},
     {"enable_sco_config", set_enable_sco_config, 0},
     {"use_controller_addr", set_use_controller_addr, 0},
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
+    {"enable_heartbeat_config", set_enable_heartbeat_config, 0},
     {"wakeup_power_gpio_pin", set_powerkey_gpio_pin, 0},
     {"wakeup_power_gpio_high_duration", set_powerkey_gpio_high_duration, 0},
     {"wakeup_power_gpio_low_duration", set_powerkey_gpio_low_duration, 0},
@@ -586,7 +596,6 @@ static const conf_entry_t conf_table[] = {
     {"wakeup_scan_filter_policy", set_wakeup_scan_filter_policy, 0},
     {"wakeup_local_heartbeat_timer_value",
      set_wakeup_local_heartbeat_timer_value, 0},
-#endif
     {(const char*)NULL, NULL, 0}};
 
 /*******************************************************************************
@@ -1032,7 +1041,10 @@ static int detect_and_download_fw() {
       tcflush(mchar_fd, TCIOFLUSH);
     }
 
-/* download fw image */
+    /* download fw image */
+    if (auto_select_fw_name == TRUE) {
+      fw_loader_get_default_fw_name(pFileName_image, sizeof(pFileName_image));
+    }
 #ifdef FW_LOADER_V2
     download_ret = bt_vnd_mrvl_download_fw_v2(mchar_port, baudrate_dl_image,
                                               pFileName_image);
@@ -1316,8 +1328,8 @@ void bt_vnd_gpio_configuration(int value) {
 static int bt_vnd_send_inband_ir(int32_t baudrate) {
   int cmd_resp_len = 0;
   unsigned char inband_reset_cmd[] = {0x01, 0xFC, 0xFC, 0x00};
-  unsigned char inband_reset_resp[] = {
-      0x04, 0x0E, 0x04, 0x01, 0xFC, 0xFC, 0x00};
+  unsigned char inband_reset_resp[] = {0x04, 0x0E, 0x04, 0x01,
+                                       0xFC, 0xFC, 0x00};
   unsigned char hci_resp[sizeof(inband_reset_resp)];
   if (get_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED) == 1) {
     if (last_baudrate != baudrate) {
@@ -1338,11 +1350,9 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
       VNDDBG("start read hci event\n");
       cmd_resp_len = sizeof(inband_reset_resp);
       memset(hci_resp, 0x00, cmd_resp_len);
-      if ((cmd_resp_len !=
-           read_hci_event(mchar_fd, hci_resp, cmd_resp_len,
-                          POLL_INBAND_COMMAND_MS)) ||
-          memcmp(hci_resp, inband_reset_resp, cmd_resp_len) !=
-              0) {
+      if ((cmd_resp_len != read_hci_event(mchar_fd, hci_resp, cmd_resp_len,
+                                          POLL_INBAND_COMMAND_MS)) ||
+          memcmp(hci_resp, inband_reset_resp, cmd_resp_len) != 0) {
         VNDDBG("Failed to read Inband reset response");
         return -1;
       }
@@ -1399,9 +1409,9 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 
       if (*state == BT_VND_PWR_OFF) {
         VNDDBG("power off --------------------------------------*\n");
-#if (NXP_HEARTBEAT_FEATURE_SUPPORT == TRUE)
-        wakeup_kill_heartbeat_thread();
-#endif
+        if (enable_heartbeat_config == TRUE) {
+          wakeup_kill_heartbeat_thread();
+        }
         if (adapterState == BT_VND_PWR_ON) {
           VNDDBG("BT adapter switches from ON to OFF .. \n");
           adapterState = BT_VND_PWR_OFF;

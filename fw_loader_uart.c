@@ -120,7 +120,27 @@ uint8 fw_init_config_bin[FW_INIT_CONFIG_LEN];
 const UART_BAUDRATE UartCfgTbl[] = {
     {115200, 16, 0x0075F6FD}, {3000000, 1, 0x00C00000},
 };
-
+#if defined(__CWCC__) || defined(_WIN32) || defined(_WIN64)
+#pragma pack(push, 1)
+#else
+#pragma pack(1)
+#endif
+typedef struct {
+  uint8 pkt_hdr;
+  union {
+    uint32 pyld_buff;
+    struct {
+      uint16 uiChipId;
+      uint8 uiLoaderVer;
+      uint8 uiCrc;
+    };
+  };
+} V3_START_IND;
+#if defined(__CWCC__) || defined(_WIN32) || defined(_WIN64)
+#pragma pack(pop)
+#else
+#pragma pack()
+#endif
 //#define DEBUG_PRINT
 /*==================== Typedefs =================================================*/
 
@@ -376,33 +396,51 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
   uint64 startTime = 0;
   uint64 currTime = 0;
   BOOLEAN bResult = TRUE;
+  V3_START_IND v3_start_ind;
   ucRcvdHeader = 0xFF;
   startTime = fw_upload_GetTime();
   while (!ucDone) {
-  ucRcvdHeader = fw_upload_ComReadChar(mchar_fd);
-  if ((ucRcvdHeader == V1_HEADER_DATA_REQ) ||(ucRcvdHeader == V1_START_INDICATION) ||
+    ucRcvdHeader = fw_upload_ComReadChar(mchar_fd);
+    if ((ucRcvdHeader == V1_HEADER_DATA_REQ) ||(ucRcvdHeader == V1_START_INDICATION) ||
       (ucRcvdHeader == V3_START_INDICATION) ||(ucRcvdHeader == V3_HEADER_DATA_REQ)) {
-    ucDone = 1;
+      ucDone = 1;
 #ifdef DEBUG_PRINT
-    PRINT("\nReceived 0x%x ", ucRcvdHeader);
+      PRINT("\nReceived 0x%x ", ucRcvdHeader);
 #endif
-    if (!bVerChecked) {
+      if (!bVerChecked) {
+        bVerChecked = TRUE;
       if ((ucRcvdHeader == V1_HEADER_DATA_REQ) ||(ucRcvdHeader == V1_START_INDICATION)) {
-        uiProVer = Ver1;
-      } else {
+          uiProVer = Ver1;
+        } else {
           uiProVer = Ver3;
           if (V3_START_INDICATION) {
-            while (fw_upload_GetBufferSize(mchar_fd) < 2) {
+            memset(&v3_start_ind, 0, sizeof(v3_start_ind));
+            v3_start_ind.pkt_hdr = V3_START_INDICATION;
+            while (fw_upload_GetBufferSize(mchar_fd) <
+                   sizeof(v3_start_ind.pyld_buff)) {
               usleep(1000);
             };
-            chip_id = (fw_upload_ComReadChar(mchar_fd) |
-                       (fw_upload_ComReadChar(mchar_fd) << 8));
-            VNDDBG("Chip ID: 0x%x ", chip_id);
+            VNDDBG("Buffer size=%d", fw_upload_GetBufferSize(mchar_fd));
+            for (int i = 0; i < sizeof(v3_start_ind.pyld_buff); i++) {
+              v3_start_ind.pyld_buff |=
+                  ((fw_upload_ComReadChar(mchar_fd) & 0xFF) << i * 8);
+            }
+            VNDDBG("Payload data=%x", v3_start_ind.pyld_buff);
+            if (v3_start_ind.uiCrc !=
+                crc8((uint8*)&v3_start_ind, sizeof(v3_start_ind) - 1)) {
+              ucDone = 0;
+              bVerChecked = FALSE;
+              send_poke = TRUE;
+              tcflush(mchar_fd, TCIFLUSH);
+              VNDDBG("CRC Check failed");
+            } else {
+              chip_id = v3_start_ind.uiChipId;
+              VNDDBG("Chip ID: 0x%x ", chip_id);
+            }
           }
         }
-      bVerChecked = TRUE;
-    }
-  } else {
+      }
+    } else {
       if (uiMs) {
         currTime = fw_upload_GetTime();
         if ((currTime - startTime) > uiMs) {
@@ -414,13 +452,11 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
           break;
         }
       }
-      if (enable_poke_controller && send_poke &&
-          (!get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED))) {
+      if (enable_poke_controller && send_poke) {
         fw_upload_ComWriteChars(mchar_fd, m_Buffer_Poke, 2);
         VNDDBG("Poke Sent");
         send_poke = FALSE;
       }
-
       fw_upload_DelayInMs(1);
     }
   }
@@ -1849,9 +1885,10 @@ int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
  * Return Value: NA
  *****************************************************************************/
 void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size) {
+  int i = 0;
   if (uiProVer == Ver3) {
     int size_of_array = sizeof(soc_fw_name_dict) / sizeof(soc_fw_name_dict[0]);
-    for (int i = 0; i < size_of_array; i++) {
+    for (i = 0; i < size_of_array; i++) {
       if (soc_fw_name_dict[i].soc_id == chip_id) {
         memset(fw_name, 0, fw_name_size);
         strcpy(fw_name, FW_DEFAULT_PATH);
@@ -1859,6 +1896,10 @@ void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size) {
         VNDDBG("Default Firmware selected= %s", fw_name);
         break;
       }
+    }
+    if (i == size_of_array) {
+      ALOGE("Unable to Map Chip ID %04x to FW Name, using default FW name",
+            chip_id);
     }
   }
 }

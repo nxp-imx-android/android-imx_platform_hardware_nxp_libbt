@@ -33,7 +33,6 @@ typedef struct {
 } UART_BAUDRATE;
 
 extern int mchar_fd;
-extern int uart_break_before_change_baudrate;
 extern uint8_t independent_reset_mode;
 
 /*===================== Global Vars ==============================================*/

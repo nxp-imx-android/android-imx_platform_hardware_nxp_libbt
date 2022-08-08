@@ -87,7 +87,6 @@ static char mbt_port[MAX_PATH_LEN] = "/dev/mbtchar0";
 /* for NXP Uart interface */
 static char mchar_port[MAX_PATH_LEN] = "/dev/ttyUSB0";
 static int is_uart_port = 0;
-static int uart_break_before_open = 0;
 static int32_t baudrate_fw_init = 115200;
 static int32_t baudrate_bt = 3000000;
 int write_bdaddrss = 0;
@@ -118,9 +117,7 @@ uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0x00  /* 1st */
 };
 #ifdef UART_DOWNLOAD_FW
-int uart_break_before_change_baudrate = 0;
 static int enable_download_fw = 0;
-static int uart_break_after_dl_helper = 0;
 static int uart_sleep_after_dl = 100;
 static int download_helper = 0;
 static bool auto_select_fw_name = TRUE;
@@ -198,14 +195,6 @@ static int set_is_uart_port(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
   is_uart_port = atoi(p_conf_value);
-  return 0;
-}
-
-static int set_uart_break_before_open(char* p_conf_name, char* p_conf_value,
-                                      int param) {
-  UNUSED(p_conf_name);
-  UNUSED(param);
-  uart_break_before_open = atoi(p_conf_value);
   return 0;
 }
 
@@ -330,23 +319,6 @@ static int set_enable_download_fw(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
   enable_download_fw = atoi(p_conf_value);
-  return 0;
-}
-
-static int set_uart_break_before_change_baudrate(char* p_conf_name,
-                                                 char* p_conf_value,
-                                                 int param) {
-  UNUSED(p_conf_name);
-  UNUSED(param);
-  uart_break_before_change_baudrate = atoi(p_conf_value);
-  return 0;
-}
-
-static int set_uart_break_after_dl_helper(char* p_conf_name, char* p_conf_value,
-                                          int param) {
-  UNUSED(p_conf_name);
-  UNUSED(param);
-  uart_break_after_dl_helper = atoi(p_conf_value);
   return 0;
 }
 
@@ -552,7 +524,6 @@ static const conf_entry_t conf_table[] = {
     {"mchar_port", set_mchar_port, 0},
     {"mbt_port", set_mbt_port, 0},
     {"is_uart_port", set_is_uart_port, 0},
-    {"uart_break_before_open", set_uart_break_before_open, 0},
     {"baudrate_bt", set_baudrate_bt, 0},
     {"baudrate_fw_init", set_baudrate_fw_init, 0},
     {"bd_address", set_bd_address_buf, 0},
@@ -567,9 +538,6 @@ static const conf_entry_t conf_table[] = {
     {"send_oob_ir_trigger", set_send_oob_ir_trigger, 0},
 #ifdef UART_DOWNLOAD_FW
     {"enable_download_fw", set_enable_download_fw, 0},
-    {"uart_break_before_change_baudrate", set_uart_break_before_change_baudrate,
-     0},
-    {"uart_break_after_dl_helper", set_uart_break_after_dl_helper, 0},
     {"pFileName_image", set_pFileName_image, 0},
     {"pFileName_helper", set_pFileName_helper, 0},
     {"baudrate_dl_helper", set_baudrate_dl_helper, 0},
@@ -993,30 +961,15 @@ static int uart_init_open(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
 
 static int detect_and_download_fw() {
   int download_ret = 0;
-  int fw_downloaded = 0;
-
-/* detect fw status */
+#ifndef FW_LOADER_V2
+  init_crc8();
+#endif
+/* force download only when header is received */
 #ifdef FW_LOADER_V2
   if (bt_vnd_mrvl_check_fw_status_v2()) {
 #else
   if (bt_vnd_mrvl_check_fw_status()) {
 #endif
-    /* force download only when header is received */
-    fw_downloaded = 0;
-  } else {
-    /* ignore download */
-    fw_downloaded = 1;
-    set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
-    goto done;
-  }
-
-  VNDDBG(" fw_downloaded %d", fw_downloaded);
-
-  if (!fw_downloaded) {
-#ifndef FW_LOADER_V2
-    init_crc8();
-#endif
-    /* download helper */
     if (download_helper) {
 #ifdef FW_LOADER_V2
       download_ret = bt_vnd_mrvl_download_fw_v2(mchar_port, baudrate_dl_helper,
@@ -1059,8 +1012,6 @@ static int detect_and_download_fw() {
 
     tcflush(mchar_fd, TCIFLUSH);
     if (uart_sleep_after_dl) usleep(uart_sleep_after_dl * 1000);
-
-    set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
   }
 done:
   return download_ret;
@@ -1171,7 +1122,7 @@ static int config_uart() {
   }
 
   usleep(20 * 1000);
-  set_prop_int32(PROP_BLUETOOTH_OPENED, 1);
+  set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
   return 0;
 }
 static bool bt_vnd_is_rfkill_disabled(void) {
@@ -1421,20 +1372,16 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         if (independent_reset_mode == IR_MODE_INBAND_VSC) {
           VNDDBG("Reset the download status for Inband IR \n");
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-          set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
         }
         adapterState = BT_VND_PWR_ON;
         if (send_oob_ir_trigger == IR_TRIGGER_RFKILL) {
           bt_vnd_set_bluetooth_power(FALSE);
           usleep(5000);
           bt_vnd_set_bluetooth_power(TRUE);
-
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-          set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
         }
         if (send_oob_ir_trigger == IR_TRIGGER_GPIO) {
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-          set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
 
           VNDDBG("-------------- Setting GPIO LOW -----------------\n");
           bt_vnd_gpio_configuration(FALSE);
@@ -1466,16 +1413,12 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 #ifdef UART_DOWNLOAD_FW
         if (enable_download_fw) {
           VNDDBG("download_helper %d\n", download_helper);
-          VNDDBG("uart_break_before_change_baudrate %d\n",
-                 uart_break_before_change_baudrate);
           VNDDBG("baudrate_dl_helper %d\n", baudrate_dl_helper);
           VNDDBG("baudrate_dl_image %d\n", baudrate_dl_image);
           VNDDBG("pFileName_helper %s\n", pFileName_helper);
           VNDDBG("pFileName_image %s\n", pFileName_image);
           VNDDBG("iSecondBaudrate %d\n", iSecondBaudrate);
-          VNDDBG("uart_break_before_open %d\n", uart_break_before_open);
           VNDDBG("enable_download_fw %d\n", enable_download_fw);
-          VNDDBG("uart_break_after_dl_helper %d\n", uart_break_after_dl_helper);
           VNDDBG("uart_sleep_after_dl %d\n", uart_sleep_after_dl);
           VNDDBG("independent_reset_mode %d\n", independent_reset_mode);
         }
@@ -1485,7 +1428,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 
       if (is_uart_port) {
         /* ensure libbt can talk to the driver, only need open port once */
-        if (get_prop_int32(PROP_BLUETOOTH_OPENED))
+        if (get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED))
           mchar_fd = uart_init_open(mchar_port, baudrate_bt, 1);
         else {
 #ifdef UART_DOWNLOAD_FW
@@ -1521,35 +1464,11 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           pthread_mutex_unlock(&dev_file_lock);
           return -1;
         }
-      } else {
-        do {
-          mchar_fd = open(mbt_port, O_RDWR | O_NOCTTY);
-          if (mchar_fd < 0) {
-            num++;
-            if (num >= 8) {
-              ALOGE("exceed max retry count, return error");
-              pthread_mutex_unlock(&dev_file_lock);
-              return -1;
-            } else {
-              ALOGE("open USB/SD port %s failed fd: %d, retrying\n", mbt_port,
-                    mchar_fd);
-              sleep(1);
-              continue;
-            }
-          } else {
-            VNDDBG("open USB or SD port successfully, fd=%d, mbt_port=%s\n",
-                   mchar_fd, mbt_port);
-            is_uart_port = 0;
-          }
-        } while (mchar_fd < 0);
-      }
-
-      if (is_uart_port) {
+        bluetooth_opened = get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED);
 #ifdef UART_DOWNLOAD_FW
-        if (enable_download_fw) {
+        if (enable_download_fw && !get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED)) {
           if (detect_and_download_fw()) {
             ALOGE("detect_and_download_fw failed");
-            set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
             pthread_mutex_unlock(&dev_file_lock);
             return -1;
@@ -1570,7 +1489,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         }
         tcflush(mchar_fd, TCIOFLUSH);
 #endif
-        bluetooth_opened = get_prop_int32(PROP_BLUETOOTH_OPENED);
         if (!bluetooth_opened) {
 #ifdef UART_DOWNLOAD_FW
           if (!enable_download_fw)
@@ -1595,12 +1513,32 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 
           if (config_uart()) {
             ALOGE("config_uart failed");
-            set_prop_int32(PROP_BLUETOOTH_OPENED, 0);
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
             pthread_mutex_unlock(&dev_file_lock);
             return -1;
           }
         }
+      } else {
+        do {
+          mchar_fd = open(mbt_port, O_RDWR | O_NOCTTY);
+          if (mchar_fd < 0) {
+            num++;
+            if (num >= 8) {
+              ALOGE("exceed max retry count, return error");
+              pthread_mutex_unlock(&dev_file_lock);
+              return -1;
+            } else {
+              ALOGE("open USB/SD port %s failed fd: %d, retrying\n", mbt_port,
+                    mchar_fd);
+              sleep(1);
+              continue;
+            }
+          } else {
+            VNDDBG("open USB or SD port successfully, fd=%d, mbt_port=%s\n",
+                   mchar_fd, mbt_port);
+            is_uart_port = 0;
+          }
+        } while (mchar_fd < 0);
       }
 
       for (idx = 0; idx < CH_MAX; idx++) {

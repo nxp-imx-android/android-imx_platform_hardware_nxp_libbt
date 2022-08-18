@@ -85,6 +85,9 @@ endif
 ifeq ($(TARGET_PRODUCT), evk_8ulp)
     include $(LOCAL_PATH)/conf/nxp/evk_8ulp/Android.mk
 endif
+ifeq ($(TARGET_PRODUCT), watch_8ulp)
+    include $(LOCAL_PATH)/conf/nxp/watch_8ulp/Android.mk
+endif
 ifeq ($(TARGET_PRODUCT),$(filter $(TARGET_PRODUCT),mek_8q mek_8q_car mek_8q_car2))
     include $(LOCAL_PATH)/conf/nxp/mek_8q/Android.mk
 endif

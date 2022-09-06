@@ -1,0 +1,199 @@
+/******************************************************************************
+ *
+ *  Copyright 2018-2022 NXP
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at:
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
+
+libbt supports to configure some key parameters with conf file in default path /vendor/etc/bluetooth/bt_vendor.conf
+
+use "key = value" to set parameters in conf file
+
+optional keys are listed below:
+
+	mchar_port: port path used by Uart interface, the default BT uart port in libbt is /dev/ttyUSB0 
+                          if it's not the same as default port, could set mchar_port in conf file like below
+                          mchar_port = /dev/ttyXXX
+
+	mbt_port: port path used by SD or USB interface, the default BT SD/USB port in libbt is /dev/mbtchar0
+	               if it's not the same as default port, could set mbt_port in conf file like below
+		        mbt_port = /dev/mbtcharX
+
+	baudrate_fw_init: default bardrate when bluetooth fw active after download. The default value is 115200 in libbt. It's not necessary to configure this key in conf unless it need to choose other baudrate.
+
+	baudrate_bt: the baudrate expect to working on when bt running. The default value is 3000000 in libbt. It's not necessary to configure this key in conf unless it need to choose other baudrate. 
+	
+	bd_address: set bdaddress by configuration file, bdaddress is comprised by 6 bytes. You are expected to input as the format of "bd_address = xx:xx:xx:xx:xx:xx", where 'x' should be hexadecimal digits.
+
+	use_controller_addr: Use controller address if its not default and bd_address is not used.
+				Supported values:
+				use_controller_addr = 1 (Use controller address, default)
+				use_controller_addr = 0 (Dont use controller address)
+
+	pFilename_cal_data: bt calibration file, example: pFilename_cal_data = /vendor/firmware/BtCalData_ext_Boreal_P0_V2.conf
+						Note: The Baud rate within calibration file should be same as baudrate_bt(default value is 3000000) in bt_vendor.conf file.
+
+	ble_1m_power: Set signed Bluetooth LE Transmit Power level for 1M PHY, example: ble_1m_power = 10
+	ble_2m_power: Set signed Bluetooth LE Transmit Power level for 2M PHY, example: ble_1m_power = -5
+				Valid Supported Values:
+						Power Class		Minimum Tx Power 	Maximum Tx Power 
+							1.5				 -20dbm				 10dbm
+							2				 -20dbm				 4 dbm
+				Note: Incase the paramter is not set, firmware default values will be used.
+
+	bt_max_power_sel: Update classic BT max transmit power level.
+				Supported values:
+					bt_max_power_sel = 0 (Use firmware default max power level)
+					bt_max_power_sel = 1 (Initial power provided by calibration file will be used as reference for Max Tx power)
+
+				Note: This flag updates the maximum transmit power level.
+
+	pFilename_fw_init_config_bin: Provide path of FW initialization configuration binary.
+
+				Example: pFilename_fw_init_config_bin = /vendor/firmware/88W8987A0_FwConf_0.bin
+
+				Note: Make sure bt_vendor.conf paramter are updated based on feature in pFilename_fw_init_config_bin file.
+					  Feature is supported only when BT only firmware download is used.
+					  Refer conf/bin for more info.
+
+	independent_reset_mode: Select independent reset modes. 
+				Supported values:
+
+					independent_reset_mode = 0 (Disable IR configuration, default)
+
+					independent_reset_mode = 1 (Out Of Band Independent Reset during FW configuration)
+						Make sure send_oob_ir_trigger paramter is configured in bt_vendor.conf
+
+					independent_reset_mode = 2 (Inband Independent Reset during FW configuration)
+
+	send_oob_ir_trigger : Configure the Independent Reset(IR) Trigger method.
+				Supported values:
+				send_oob_ir_trigger = 0 (Disable IR Trigger, default)
+
+				send_oob_ir_trigger = 1 (Use RFKILL to trigger IR)
+
+				send_oob_ir_trigger = 2 (Use GPIO to trigger IR)
+					Note: Incase using GPIO trigger make sure independent_reset_gpio_pin, oob_ir_host_gpio_pin, chardev_name are configured in bt_vendor.conf
+
+	independent_reset_gpio_pin: SOC specific GPIO pins selected for triggering out-band reset
+				Example: independent_reset_gpio_pin = 15(default value is 255(0xFF))
+
+    oob_ir_host_gpio_pin: Exposed host specific GPIO pin on i.MX platform used to trigger pulse for IR
+				Example:ir_host_gpio_pin = 14(For i.MX8 Mini).
+
+    chardev_name: Open the desired GPIO chip by calling gpiod_chip_open API 
+				Example:chardev_name="/dev/gpiochip5" by default(For i.MX8 Mini).
+
+	enable_sco_config: Configure sco config.
+				Supported values:
+				enable_sco_config = 1 (Enable SCO cofig, default)
+				enable_sco_config = 0 (Disable SCO config)
+
+	vhal_trace_level : Select log level for BT VHAL module. Note each level will include messages from previous level as well.
+				Supported values:
+				vhal_trace_level = 0    No trace messages
+				vhal_trace_level = 1    Error condition trace messages
+				vhal_trace_level = 2    Warning condition trace messages
+				vhal_trace_level = 3    Generic Info messages    
+				vhal_trace_level = 4    Debug messages
+				vhal_trace_level = 5    Verbose trace message
+
+Below parameters are for fw download, if not use fw download by libbt, don't set any of below in conf file
+
+	enable_download_fw: set to 1 if need to download uart bt fw by libbt when bootup, default value is 0 in libbt, it always download combo fw by wifi side
+
+enable_poke_controller: Support for faster firmware download
+                        Supported values:
+                        enable_poke_controller = 0 (default)
+                        enable_poke_controller = 1 (for IW512, IW611, IW612,AW611HN/AOA,AW611HN/AOB,9098 chipsets)
+
+	pFileName_image: Bt fw path.
+
+		Example: pFileName_image = /vendor/firmware/uart8997_bt_v4.bin
+
+		Note: Setting this value can be skipped for following SOC, respective default values will be used:
+
+				9098 A1 and A2 chip 			: /vendor/firmware/uart9098_bt_v1.bin
+				IW512/AW611/IW611/IW612 A0 chip	: /vendor/firmware/uartspi_n61x.bin
+				IW512/AW611/IW611/IW612 A1 chip : /vendor/firmware/uartspi_n61x_v1.bin
+
+	pFileName_helper: bt fw helper path, example: pFileName_helper = /vendor/firmware/helper_uart_3000000.bin
+
+	iSecondBaudrate: second baudrate used when download fw. The default value is 0 in libbt, only need to configure it if for 90xx chips.
+	example: iSecondBaudrate = 3000000
+
+	enable_heartbeat_config: Used to enable/disable HEARTBEAT Configurations.
+				Supported Values:
+				enable_heartbeat_config = 0 (disable, Default)
+				enable_heartbeat_config = 1 (enable)
+
+	wakeup_power_gpio_pin : GPIO pin selected to generate high/low interrupt to wake up host when receiving the specific advertising packet from RCU Power key
+		default value: 13
+
+	wakeup_power_gpio_high_duration : the time interval for making the GPIO pin in high state for receiving the specific advertising packet from RCU Power key, unit is 100ms
+		default value: 2
+
+	wakeup_power_gpio_low_duration : the time interval for making the GPIO pin in low state for receiving the specific advertising packet from RCU Power key, unit is 100ms
+		default value : 2
+
+	wakeup_netflix_gpio_pin : GPIO pin selected to generate high/low interrupt to wake up host when receiving the specific advertising packet from RCU Netflix key
+		default value: 13
+
+	wakeup_netflix_gpio_high_duration : the time interval for making the GPIO pin in low state for receiving the specific advertising packet from RCU Netflix key, unit is 100ms
+		default value : 4
+
+	wakeup_netflix_gpio_low_duration : the time interval for making the GPIO pin in low state for receiving the specific advertising packet from RCU Netflix key, unit is 100ms
+		default value : 4
+
+	wakeup_adv_pattern : the pattern value to compare with the AD structure value in advertising packet from the air, if all the value matches perfectly, firmware will toggle the GPIO to wake up host, which is in sleep state, based on the configurations, maximum length is 16 bytes
+		Configuration rule : the order of value matters, so the configuration value shall be put in the correct sequence
+		Example: the pattern value for case 1 will be 0x00, 0x01 ,0x02, 0x03
+				 the pattern value for case 2 will be 0x03, 0x02 ,0x01, 0x00
+			case 1:
+				wakeup_adv_pattern = 0
+				wakeup_adv_pattern = 1
+				wakeup_adv_pattern = 2
+				wakeup_adv_pattern = 3
+			case 2:
+				wakeup_adv_pattern = 3
+				wakeup_adv_pattern = 2
+				wakeup_adv_pattern = 1
+				wakeup_adv_pattern = 0
+		default value : NONE
+
+	wakeup_scan_type : same definition with legacy scan parameter in Core Spec(7.8.10 in v5.3), used to wakeup scan after host entering sleep state
+		default value : 0
+
+	wakeup_scan_interval : same definition with legacy scan parameter in Core Spec(section 7.8.10 in v5.3), used to wakeup scan after host entering sleep state
+		default value : 128
+
+	wakeup_scan_window : same definition with legacy scan parameter in Core Spec(section 7.8.10 in v5.3), used to wakeup scan after host entering sleep state
+		default value : 96
+
+	wakeup_own_addr_type : same definition with legacy scan parameter in Core Spec(section 7.8.10 in v5.3), used to wakeup scan after host entering sleep state
+		default value : 0
+
+	wakeup_scan_filter_policy : same definition with legacy scan parameter in Core Spec(section 7.8.10 in v5.3), used to wakeup scan after host entering the sleep state
+		default value : 0
+
+	wakeup_local_heartbeat_timer_value : the time interval for HAL to periodically send a specific VSC, called heartbeat command, to firmware, to notify that host is still in the wake state, unit is 100ms
+		default value : 8
+
+       Below parameters are not necessary to configure in conf file when download fw by libbt.
+
+	baudrate_dl_helper: baudrate used when download helper. The default value is 115200 in libbt, only need to configure it if choose other baudrate. 
+
+	baudrate_dl_image: baudrate used when start download fw. The default value is 3000000 in libbt, only need to configure it if choose other baudrate.  
+
+	uart_sleep_after_dl: sleep time after bt fw is downloaded, unit in ms. The default value is 100 ms, only need to configure it if need sleep for more time.

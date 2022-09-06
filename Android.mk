@@ -44,6 +44,9 @@ LOCAL_SRC_FILES := \
     fw_loader_io.c \
     hardware_nxp.c
 
+# VHAL_LOG_LEVEL decides maximum log level supported at compile time between 0-5.
+LOCAL_CFLAGS += -DVHAL_LOG_LEVEL=5
+
 ifneq ($(BOARD_UART_DOWNLOAD_FW), false)
 LOCAL_CFLAGS += -DUART_DOWNLOAD_FW
 #LOCAL_CFLAGS += -DDEBUG_PRINT

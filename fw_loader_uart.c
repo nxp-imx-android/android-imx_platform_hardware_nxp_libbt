@@ -29,10 +29,9 @@
 
 #define LOG_TAG "fw_loader"
 #define FW_DEFAULT_PATH "/vendor/firmware/"
-#include <log/log.h>
 #include <cutils/properties.h>
-#define printf(fmt, ...) ALOGI("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 
+#include "bt_vendor_log.h"
 /*--------------------------------fw_loader_io_linux.c-------------------------*/
 #define TIMEOUT_FOR_READ        4000
 
@@ -57,7 +56,6 @@
 #define V3_TIMEOUT_ACK 0x7b
 #define V3_CRC_ERROR 0x7c
 
-#define PRINT(...)         printf(__VA_ARGS__)
 #define FW_INIT_CONFIG_LEN 64
 #define REQ_HEADER_LEN 1
 #define A6REQ_PAYLOAD_LEN 8
@@ -141,7 +139,7 @@ typedef struct {
 #else
 #pragma pack()
 #endif
-//#define DEBUG_PRINT
+
 /*==================== Typedefs =================================================*/
 
 /*===================== Global Vars ==============================================*/
@@ -196,10 +194,6 @@ soc_fw_name_dict_t soc_fw_name_dict[] = {
 
 uint8 uiErrCnt[16] = {0};
 static jmp_buf resync;  // Protocol restart buffer used in timeout cases.
-
-// extern struct termios ti;
-/*==================== Function Prototypes ======================================*/
-// extern int32 uart_set_speed(int32 fd, struct termios* ti, int32 speed);
 
 /*==================== Coded Procedures =========================================*/
 #ifdef TEST_CODE
@@ -330,7 +324,7 @@ void init_crc8() {
       crc = i;
       for (j = 0; j < 8; j++) crc = (crc << 1) ^ ((crc & 0x80) ? DI : 0);
       crc8_table[i] = crc & 0xFF;
-      /* printf("table[%d] = %d (0x%X)\n", i, crc, crc); */
+      /* VND_LOGV("table[%d] = %d (0x%X)", i, crc, crc); */
     }
     made_table = 1;
   }
@@ -404,9 +398,7 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
     if ((ucRcvdHeader == V1_HEADER_DATA_REQ) ||(ucRcvdHeader == V1_START_INDICATION) ||
       (ucRcvdHeader == V3_START_INDICATION) ||(ucRcvdHeader == V3_HEADER_DATA_REQ)) {
       ucDone = 1;
-#ifdef DEBUG_PRINT
-      PRINT("\nReceived 0x%x ", ucRcvdHeader);
-#endif
+      VND_LOGV("Received 0x%x ", ucRcvdHeader);
       if (!bVerChecked) {
         bVerChecked = TRUE;
       if ((ucRcvdHeader == V1_HEADER_DATA_REQ) ||(ucRcvdHeader == V1_START_INDICATION)) {
@@ -420,22 +412,22 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
                    sizeof(v3_start_ind.pyld_buff)) {
               usleep(1000);
             };
-            VNDDBG("Buffer size=%d", fw_upload_GetBufferSize(mchar_fd));
+            VND_LOGD("Buffer size=%d", fw_upload_GetBufferSize(mchar_fd));
             for (int i = 0; i < sizeof(v3_start_ind.pyld_buff); i++) {
               v3_start_ind.pyld_buff |=
                   ((fw_upload_ComReadChar(mchar_fd) & 0xFF) << i * 8);
             }
-            VNDDBG("Payload data=%x", v3_start_ind.pyld_buff);
+            VND_LOGD("Payload data=%x", v3_start_ind.pyld_buff);
             if (v3_start_ind.uiCrc !=
                 crc8((uint8*)&v3_start_ind, sizeof(v3_start_ind) - 1)) {
               ucDone = 0;
               bVerChecked = FALSE;
               send_poke = TRUE;
               tcflush(mchar_fd, TCIFLUSH);
-              VNDDBG("CRC Check failed");
+              VND_LOGE("CRC Check failed");
             } else {
               chip_id = v3_start_ind.uiChipId;
-              VNDDBG("Chip ID: 0x%x ", chip_id);
+              VND_LOGD("Chip ID: 0x%x ", chip_id);
             }
           }
         }
@@ -444,8 +436,8 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
       if (uiMs) {
         currTime = fw_upload_GetTime();
         if ((currTime - startTime) > uiMs) {
-          VNDDBG(
-              "\n fw_upload_WaitForHeaderSignature Timeout, Header Received: "
+          VND_LOGE(
+              "fw_upload_WaitForHeaderSignature Timeout, Header Received: "
               "0x%x, timeout %d, elapsed time %llu",
               ucRcvdHeader, uiMs, (currTime - startTime));
           bResult = FALSE;
@@ -454,7 +446,7 @@ fw_upload_WaitForHeaderSignature(uint32 uiMs)
       }
       if (enable_poke_controller && send_poke) {
         fw_upload_ComWriteChars(mchar_fd, m_Buffer_Poke, 2);
-        VNDDBG("Poke Sent");
+        VND_LOGD("Poke Sent");
         send_poke = FALSE;
       }
       fw_upload_DelayInMs(1);
@@ -503,24 +495,18 @@ static uint16 fw_upload_WaitFor_Len(FILE *pFile) {
   // Check if the length is valid.
   if ((uiLen ^ uiLenComp) == uiXorOfLen)  // All 1's
   {
-#ifdef DEBUG_PRINT
-    PRINT("\n       bootloader asks for %d bytes \n ", uiLen);
-#endif
+    VND_LOGV("bootloader asks for %d bytes", uiLen);
     // Successful. Send back the ack.
     if ((ucRcvdHeader == V1_HEADER_DATA_REQ) || (ucRcvdHeader == V1_START_INDICATION)) {
       fw_upload_ComWriteChar(mchar_fd, V1_REQUEST_ACK);
-#ifdef DEBUG_PRINT
-      PRINT("\n  BOOT_HEADER_ACK 0x5a is sent\n");
-#endif
+      VND_LOGV("BOOT_HEADER_ACK 0x5a is sent");
       if (ucRcvdHeader == V1_START_INDICATION) {
         longjmp(resync, 1);
       }
     }
   } else {
-#ifdef DEBUG_PRINT
-    PRINT("\n    NAK case: bootloader LEN = %x bytes \n ", uiLen);
-    PRINT("\n    NAK case: bootloader LENComp = %x bytes \n ", uiLenComp);
-#endif
+    VND_LOGV("NAK case: bootloader LEN = %x bytes", uiLen);
+    VND_LOGV("NAK case: bootloader LENComp = %x bytes", uiLenComp);
     // Failure due to mismatch.
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
     // Start all over again.
@@ -595,27 +581,27 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
 
         if(ucTestCase == 301 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+          VND_LOGV("TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
         }
         else if (ucTestCase == 302 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+          VND_LOGV("TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
           ucTestDone = 1;
         }
         else if (ucTestCase == 303 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+          VND_LOGV("TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAck);
           ucTestDone = 1;
         }
         else if (ucTestCase == 304 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+          VND_LOGV("TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAck);
           fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
@@ -623,21 +609,21 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
         }
         else if (ucTestCase == 305 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
           ucTestDone = 1;
         }
         else if (ucTestCase == 306 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, NOT send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, NOT send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAck);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
         }
         else if (ucTestCase == 307 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAck);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
@@ -645,21 +631,21 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
         }
         else if (ucTestCase == 308 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
         }
         else if (ucTestCase == 309 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAck);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
         }
         else if (ucTestCase == 310 && !ucTestDone)
         {
-          PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
           fw_upload_ComWriteChar(mchar_fd, uiAck);
           fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
           fw_upload_DelayInMs(ucSleepTimeMs);
@@ -682,27 +668,27 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
 
         if(ucTestCase == 311 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+           VND_LOGV("TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
            fw_upload_DelayInMs(ucSleepTimeMs);
            ucTestDone = 1;
         }
         else if (ucTestCase == 312 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+           VND_LOGV("TC-%d:  Sleep %dms, NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
            fw_upload_DelayInMs(ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
            ucTestDone = 1;
         }
         else if (ucTestCase == 313 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+           VND_LOGV("TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
            fw_upload_DelayInMs(ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAck);
            ucTestDone = 1;
         }
         else if (ucTestCase == 314 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
+           VND_LOGV("TC-%d:  Sleep %dms, send V3_REQUEST_ACK for Header Signature %02X, send CRC byte", ucTestCase, ucSleepTimeMs, ucRcvdHeader);
            fw_upload_DelayInMs(ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAck);
            fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
@@ -710,21 +696,21 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
         }
         else if (ucTestCase == 315 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+           VND_LOGV("TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
            fw_upload_DelayInMs(ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
            ucTestDone = 1;
         }
         else if (ucTestCase == 316 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, NOT send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+           VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, NOT send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAck);
            fw_upload_DelayInMs(ucSleepTimeMs);
            ucTestDone = 1;
         }
         else if (ucTestCase == 317 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+           VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, sleep %dms, send CRC byte", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAck);
            fw_upload_DelayInMs(ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
@@ -732,21 +718,21 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
         }
         else if (ucTestCase == 318 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+           VND_LOGV("TC-%d:  NOT send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
            fw_upload_DelayInMs(ucSleepTimeMs);
            ucTestDone = 1;
         }
         else if (ucTestCase == 319 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+           VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, NOT send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAck);
            fw_upload_DelayInMs(ucSleepTimeMs);
            ucTestDone = 1;
         }
         else if (ucTestCase == 320 && !ucTestDone)
         {
-           PRINT("\n         TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
+           VND_LOGV("TC-%d:  Send V3_REQUEST_ACK for Header Signature %02X, send CRC byte, sleep %dms", ucTestCase, ucRcvdHeader, ucSleepTimeMs);
            fw_upload_ComWriteChar(mchar_fd, uiAck);
            fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
            fw_upload_DelayInMs(ucSleepTimeMs);
@@ -776,11 +762,9 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
     uiAckCrc = crc8(ucCalCrc, 5);
     fw_upload_ComWriteChar(mchar_fd, uiAckCrc);
   } else {
-    PRINT("\nNon-empty else statement\n");
+    VND_LOGV("Non-empty else statement");
   }
-#ifdef DEBUG_PRINT
-  printf("\n ===> ACK = %x, CRC = %x \n", uiAck, uiAckCrc);
-#endif
+  VND_LOGV(" ===> ACK = %x, CRC = %x ", uiAck, uiAckCrc);
 }
 /******************************************************************************
  *
@@ -818,7 +802,7 @@ BOOLEAN fw_upload_Check_ReqCrc(uint8 *uiStr, uint8 uiReq) {
       return FALSE;
     }
   } else {
-    PRINT("\nNon-empty else statement\n");
+    VND_LOGV("Non-empty else statement");
   }
 
   return TRUE;
@@ -856,10 +840,8 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&ulNewOffset, 4);
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiNewError, 2);
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiNewCrc, 1);
-#ifdef DEBUG_PRINT
-    PRINT("\n <=== REQ = 0xA7, Len = %x,Off = %x,Err = %x,CRC = %x\n ", uiNewLen, ulNewOffset,
+    VND_LOGV(" <=== REQ = 0xA7, Len = %x,Off = %x,Err = %x,CRC = %x ", uiNewLen, ulNewOffset,
            uiNewError, uiNewCrc);
-#endif
     // check crc
     uiTmp[0] = V3_HEADER_DATA_REQ;
     fw_upload_StoreBytes((uint32)uiNewLen, sizeof(uiNewLen), &uiTmp[1]);
@@ -872,7 +854,7 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
 
     if (ucTestCase == 331 && !ucTestDone)
     {
-       PRINT("\n         TC-%d:  Simulate Device CRC error on Header Signature 0x%X", ucTestCase, ucRcvdHeader);
+       VND_LOGV("TC-%d:  Simulate Device CRC error on Header Signature 0x%X", ucTestCase, ucRcvdHeader);
        bCrcMatch = 0;
        ucTestDone = 1;
     }
@@ -880,9 +862,7 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
 #endif
 
     if (!bCrcMatch) {
-#ifdef DEBUG_PRINT
-      PRINT("\n === REQ = 0xA7, CRC Mismatched === ");
-#endif
+      VND_LOGV(" === REQ = 0xA7, CRC Mismatched === ");
       fw_upload_Send_Ack(V3_CRC_ERROR);
       status = FALSE;
     }
@@ -891,7 +871,7 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiChipId, 2);
     uiVersion = fw_upload_ComReadChar(mchar_fd);
     uiReqCrc = fw_upload_ComReadChar(mchar_fd);
-    PRINT("\nChipID is : %x, Version is : %x\n", uiChipId, uiVersion);
+    VND_LOGV("ChipID is : %x, Version is : %x", uiChipId, uiVersion);
 
     // check crc
     uiTmp[0] = V3_START_INDICATION;
@@ -904,7 +884,7 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
 
     if (ucTestCase == 330 && !ucTestDone)
     {
-       PRINT("\n         TC-%d:  Simulate Device CRC error on Header Signature 0x%X", ucTestCase, ucRcvdHeader);
+       VND_LOGV("TC-%d:  Simulate Device CRC error on Header Signature 0x%X", ucTestCase, ucRcvdHeader);
        bCrcMatch = 0;
        ucTestDone = 1;
     }
@@ -912,17 +892,13 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
 #endif
 
     if (bCrcMatch) {
-#ifdef DEBUG_PRINT
-      PRINT("\n === REQ = 0xAB, CRC Matched === ");
-#endif
+      VND_LOGV(" === REQ = 0xAB, CRC Matched === ");
       fw_upload_Send_Ack(V3_REQUEST_ACK);
       if(iSecondBaudRate == 0) {
         longjmp(resync, 1);
       }
     } else {
-#ifdef DEBUG_PRINT
-      PRINT("\n === REQ = 0xAB, CRC Mismatched === ");
-#endif
+      VND_LOGV(" === REQ = 0xAB, CRC Mismatched === ");
       fw_upload_Send_Ack(V3_CRC_ERROR);
       status = FALSE;
       if(iSecondBaudRate == 0) {
@@ -930,7 +906,7 @@ static BOOLEAN fw_upload_WaitFor_Req(int32 iSecondBaudRate) {
       }
     }
   } else {
-    PRINT("\nNon-empty else statement\n");
+    VND_LOGV("Non-empty else statement");
   }
   return status;
 }
@@ -988,9 +964,7 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr) {
     if (ucRcvdHeader == V1_HEADER_DATA_REQ) {
       ucStr[ucStringCnt++] = ucRcvdHeader;
       ucDone = TRUE;
-#ifdef DEBUG_PRINT
-      PRINT("\nReceived 0x%x\n ", ucRcvdHeader);
-#endif
+      VND_LOGV("Received 0x%x ", ucRcvdHeader);
     } else {
       fw_upload_DelayInMs(1);
     }
@@ -1039,28 +1013,20 @@ static void fw_upload_GetLast5Bytes(uint8 *buf) {
   fw_upload_GetHeaderStartBytes(ucString);
   if(fw_upload_lenValid(&uiTempLen, ucString) == TRUE) {
   //Valid length recieved
-#ifdef DEBUG_PRINT
-      PRINT("\n Valid length = %d \n", uiTempLen);
-#endif
+      VND_LOGV(" Valid length = %d ", uiTempLen);
   }
 
   if ((fifosize < 6) && ((uiTempLen == HDR_LEN) || (uiTempLen == fw_upload_GetDataLen(buf)))) {
-#ifdef DEBUG_PRINT
-    PRINT("=========>success case fifo size= %d\n", fifosize);
-#endif
+    VND_LOGV("=========>success case fifo size= %d", fifosize);
     uiErrCase = FALSE;
   } else  // start to get last valid 5 bytes
   {
-#ifdef DEBUG_PRINT
-    PRINT("=========>fail case fifo size= %d \n", fifosize);
-#endif
+    VND_LOGV("=========>fail case fifo size= %d ", fifosize);
     while (fw_upload_lenValid(&uiTempLen, ucString) == FALSE) {
       fw_upload_GetHeaderStartBytes(ucString);
       fifosize -= 5;
     }
-#ifdef DEBUG_PRINT
-    PRINT("Error cases 1, 2, 3, 4, 5...\n");
-#endif
+    VND_LOGV("Error cases 1, 2, 3, 4, 5...");
     if (fifosize > 5) {
       fifosize -= 5;
       do {
@@ -1078,9 +1044,7 @@ static void fw_upload_GetLast5Bytes(uint8 *buf) {
           }
           alla5times = TRUE;
         } while (a5cnt == 5);
-#ifdef DEBUG_PRINT
-        PRINT("a5 count in last 5 bytes: %d\n", a5cnt);
-#endif
+        VND_LOGV("a5 count in last 5 bytes: %d", a5cnt);
         if (fw_upload_lenValid(&uiTempLen, ucTemp) == FALSE) {
           for (i = 0; i < (5 - a5cnt); i++) {
             ucTemp[i + a5cnt] = fw_upload_ComReadChar(mchar_fd);
@@ -1132,10 +1096,8 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
       if ((uiBytesToSend == HDR_LEN) && (!b16BytesData)) {
         if ((uiFirstChunkSent == 0) || ((uiFirstChunkSent == 1) && (uiErrCase == TRUE))) {
 // Write first 16 bytes of buffer
-#ifdef DEBUG_PRINT
-          PRINT("\n====>  Sending first chunk...\n");
-          PRINT("\n====>  Sending %d bytes...\n", uiBytesToSend);
-#endif
+          VND_LOGV("====>  Sending first chunk...");
+          VND_LOGV("====>  Sending %d bytes...", uiBytesToSend);
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiBytesToSend);
           if (cmd7_Req == TRUE || EntryPoint_Req == TRUE) {
             uiBytesToSend = HDR_LEN;
@@ -1154,9 +1116,7 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
         }
       } else {
 // Write remaining bytes
-#ifdef DEBUG_PRINT
-        PRINT("\n====>  Sending %d bytes...\n", uiBytesToSend);
-#endif
+        VND_LOGV("====>  Sending %d bytes...", uiBytesToSend);
         if (uiBytesToSend != 0) {
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)&ucBuf[HDR_LEN], uiBytesToSend);
           uiFirstChunkSent = 1;
@@ -1168,9 +1128,7 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
           }
         } else  // end of bin download
         {
-#ifdef DEBUG_PRINT
-          PRINT("\n ========== Download Complete =========\n\n");
-#endif
+          VND_LOGV(" ========== Download Complete =========");
           return 0;
         }
       }
@@ -1180,41 +1138,33 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
         // some kind of error
         if (uiLenToSend == (HDR_LEN + 1)) {
 // Send first chunk again
-#ifdef DEBUG_PRINT
-          PRINT("\n1. Resending first chunk...\n");
-#endif
+          VND_LOGV("1. Resending first chunk...");
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, (uiLenToSend - 1));
           uiBytesToSend = uiDataLen;
           uiFirstChunkSent = 0;
         } else if (uiLenToSend == (uiDataLen + 1)) {
 // Send second chunk again
-#ifdef DEBUG_PRINT
-          PRINT("\n2. Resending second chunk...\n");
-#endif
+          VND_LOGV("2. Resending second chunk...");
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)&ucBuf[HDR_LEN], (uiLenToSend - 1));
           uiBytesToSend = HDR_LEN;
           uiFirstChunkSent = 1;
         } else {
-          PRINT("Non-empty terminating else statement uiLenToSend = %d ",
+          VND_LOGV("Non-empty terminating else statement uiLenToSend = %d ",
                 uiLenToSend);
         }
       } else if (uiLenToSend == HDR_LEN) {
 // Out of sync. Restart sending buffer
-#ifdef DEBUG_PRINT
-        PRINT("Restart sending the 1st chunk...");
-#endif
+        VND_LOGV("Restart sending the 1st chunk...");
         fw_upload_ComWriteChars(mchar_fd, (uint8*)ucBuf, uiLenToSend);
         uiBytesToSend = uiDataLen;
         uiFirstChunkSent = 0;
       } else if (uiLenToSend == uiDataLen) {
-#ifdef DEBUG_PRINT
-        PRINT("Restart sending 2nd chunk...");
-#endif
+        VND_LOGV("Restart sending 2nd chunk...");
         fw_upload_ComWriteChars(mchar_fd, (uint8*)&ucBuf[HDR_LEN], uiLenToSend);
         uiBytesToSend = HDR_LEN;
         uiFirstChunkSent = 1;
       } else {
-        PRINT("Non-empty else statement uiLenToSend = %d", uiLenToSend);
+        VND_LOGV("Non-empty else statement uiLenToSend = %d", uiLenToSend);
       }
     }
     // Get last 5 bytes now
@@ -1225,20 +1175,14 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
       if (fw_upload_lenValid(&uiLenToSend, ucString) == TRUE) {
         // Valid length received
         uiValidLen = TRUE;
-#ifdef DEBUG_PRINT
-        PRINT("\n Valid length = %d \n", uiLenToSend);
-#endif
+        VND_LOGV(" Valid length = %d ", uiLenToSend);
         // ACK the bootloader
         fw_upload_ComWriteChar(mchar_fd, V1_REQUEST_ACK);
-#ifdef DEBUG_PRINT
-        PRINT("\n  BOOT_HEADER_ACK 0x5a sent \n");
-#endif
+        VND_LOGV("  BOOT_HEADER_ACK 0x5a sent ");
       }
     } while (!uiValidLen);
   }
-#ifdef DEBUG_PRINT
-  PRINT("\n ========== Buffer is successfully sent =========\n\n");
-#endif
+  VND_LOGV(" ========== Buffer is successfully sent =========");
   return uiLenToSend;
 }
 
@@ -1266,9 +1210,6 @@ static uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf, BOOLEAN uiH
 static uint16 fw_upload_V1SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend) {
   uint16 ucDataLen, uiLen;
   uint32 ulCmd;
-#ifdef DEBUG_PRINT
-  uint16 i;
-#endif
   memset(ucByteBuffer, 0, sizeof(ucByteBuffer));
 
   cmd7_Req = FALSE;
@@ -1291,23 +1232,20 @@ static uint16 fw_upload_V1SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend) 
       EntryPoint_Req = TRUE;
     }
   }
-
 #ifdef DEBUG_PRINT
-  PRINT("The buffer is to be sent: %d", uiLenToSend + ucDataLen);
-  for(i = 0; i < (uiLenToSend + ucDataLen); i ++)
+  VND_LOGV("The buffer is to be sent: %d", uiLenToSend + ucDataLen);
+  for(int i = 0; i < (uiLenToSend + ucDataLen); i ++)
   {
     if(i % 16 == 0)
     {
-      PRINT("\n");
+      VND_LOGV("\n");
     }
-      PRINT(" %02x ", ucByteBuffer[i]);
+      VND_LOGV(" %02x ", ucByteBuffer[i]);
   }
 #endif
   // start to send Temp buffer
   uiLen = fw_upload_SendBuffer(uiLenToSend, ucByteBuffer, FALSE);
-#ifdef DEBUG_PRINT
-  PRINT("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
-#endif
+  VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
 
   return uiLen;
 }
@@ -1338,9 +1276,7 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
   // Retransmittion of previous block
   if (ulOffset == ulLastOffsetToSend)
   {
-#ifdef DEBUG_PRINT
-    PRINT("\nResend offset %d...\n", ulOffset);
-#endif
+    VND_LOGV("Resend offset %d...", ulOffset);
     fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
   }
   else
@@ -1360,21 +1296,21 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
     {
        if (ucTestCase == 321 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Sleeping for %dms before sending %d bytes HEADER", ucTestCase, ucSleepTimeMs, uiLenToSend);
+          VND_LOGV("TC-%d:  Sleeping for %dms before sending %d bytes HEADER", ucTestCase, ucSleepTimeMs, uiLenToSend);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
           ucTestDone = 1;
        }
        else if (ucTestCase == 322 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send only 8 bytes of 16-byte HEADER, then sleep for %dms", ucTestCase, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send only 8 bytes of 16-byte HEADER, then sleep for %dms", ucTestCase, ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, 8);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
        }
        else if (ucTestCase == 323 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send 8 bytes of 16-byte HEADER, sleep for %dms, then send remaining 8 bytes HEADER", ucTestCase, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send 8 bytes of 16-byte HEADER, sleep for %dms, then send remaining 8 bytes HEADER", ucTestCase, ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, 8);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, &ucByteBuffer[8], 8);
@@ -1382,7 +1318,7 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 324 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send 8 bytes of 16-byte HEADER, sleep for %dms, then send full 16 bytes HEADER", ucTestCase, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send 8 bytes of 16-byte HEADER, sleep for %dms, then send full 16 bytes HEADER", ucTestCase, ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, 8);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1390,13 +1326,13 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 325 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Sleep for %dms, and NOT sending 16-bytes HEADER, but send DATA", ucTestCase, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Sleep for %dms, and NOT sending 16-bytes HEADER, but send DATA", ucTestCase, ucSleepTimeMs);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
        }
        else if (ucTestCase == 326 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send 16-byte HEADER with last byte changed to 7C", ucTestCase);
+          VND_LOGV("TC-%d:  Send 16-byte HEADER with last byte changed to 7C", ucTestCase);
           myCrcCorrByte = ucByteBuffer[uiLenToSend - 1];
           ucByteBuffer[uiLenToSend - 1] = 0x7c;
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1405,7 +1341,7 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 327 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send 16-byte HEADER with last byte changed to 7C, then sleep for %dms", ucTestCase, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send 16-byte HEADER with last byte changed to 7C, then sleep for %dms", ucTestCase, ucSleepTimeMs);
           myCrcCorrByte = ucByteBuffer[uiLenToSend - 1];
           ucByteBuffer[uiLenToSend - 1] = 0x7c;
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1415,7 +1351,7 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 328 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Sleep for %dms, and NOT sending 16-bytes HEADER, and NOT sending DATA", ucTestCase, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Sleep for %dms, and NOT sending 16-bytes HEADER, and NOT sending DATA", ucTestCase, ucSleepTimeMs);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
        }
@@ -1428,21 +1364,21 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
     {
        if (ucTestCase == 301 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Sleeping for %dms before sending %d bytes DATA", ucTestCase, ucSleepTimeMs, uiLenToSend);
+          VND_LOGV("TC-%d:  Sleeping for %dms before sending %d bytes DATA", ucTestCase, ucSleepTimeMs, uiLenToSend);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
           ucTestDone = 1;
        }
        else if (ucTestCase == 302 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send only first 8 bytes of %d bytes of DATA, then sleep for %dms", ucTestCase, uiLenToSend, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send only first 8 bytes of %d bytes of DATA, then sleep for %dms", ucTestCase, uiLenToSend, ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, 8);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
        }
        else if (ucTestCase == 303 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send first 8 bytes of %d bytes DATA, sleep for %dms, then send remaining %d DATA", ucTestCase, uiLenToSend, ucSleepTimeMs, uiLenToSend-8);
+          VND_LOGV("TC-%d:  Send first 8 bytes of %d bytes DATA, sleep for %dms, then send remaining %d DATA", ucTestCase, uiLenToSend, ucSleepTimeMs, uiLenToSend-8);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, 8);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, &ucByteBuffer[8], uiLenToSend-8);
@@ -1450,7 +1386,7 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 304 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send first 8 bytes of %d bytes DATA, sleep for %dms, then send full %d bytes DATA", ucTestCase, uiLenToSend, ucSleepTimeMs, uiLenToSend);
+          VND_LOGV("TC-%d:  Send first 8 bytes of %d bytes DATA, sleep for %dms, then send full %d bytes DATA", ucTestCase, uiLenToSend, ucSleepTimeMs, uiLenToSend);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, 8);
           fw_upload_DelayInMs(ucSleepTimeMs);
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1458,13 +1394,13 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 305 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Sleep for %dms, and NOT sending %d bytes DATA", ucTestCase, ucSleepTimeMs, uiLenToSend);
+          VND_LOGV("TC-%d:  Sleep for %dms, and NOT sending %d bytes DATA", ucTestCase, ucSleepTimeMs, uiLenToSend);
           fw_upload_DelayInMs(ucSleepTimeMs);
           ucTestDone = 1;
        }
        else if (ucTestCase == 306 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send %d bytes DATA with last byte changed to 7C", ucTestCase, uiLenToSend);
+          VND_LOGV("TC-%d:  Send %d bytes DATA with last byte changed to 7C", ucTestCase, uiLenToSend);
           myCrcCorrByte = ucByteBuffer[uiLenToSend - 1];
           ucByteBuffer[uiLenToSend - 1] = 0x7c;
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1473,7 +1409,7 @@ static void fw_upload_V3SendLenBytes(uint8 * pFileBuffer, uint16 uiLenToSend, ui
        }
        else if (ucTestCase == 307 && !ucTestDone)
        {
-          PRINT("\n         TC-%d:  Send %d bytes DATA with last byte changed to 7C, then sleep for %dms", ucTestCase, uiLenToSend, ucSleepTimeMs);
+          VND_LOGV("TC-%d:  Send %d bytes DATA with last byte changed to 7C, then sleep for %dms", ucTestCase, uiLenToSend, ucSleepTimeMs);
           myCrcCorrByte = ucByteBuffer[uiLenToSend - 1];
           ucByteBuffer[uiLenToSend - 1] = 0x7c;
           fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1546,7 +1482,7 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
   uint32 icrAddr = UARTICRAddr;
   uint32 fcrAddr = UARTFCRAddr;
 
-  PRINT("ComPort : %s\n", pPortName);
+  VND_LOGV("ComPort : %s", pPortName);
 
   for (j = 0; j < sizeof(UartCfgTbl) / sizeof(UART_BAUDRATE); j++) {
     if (iSecondBaudRate == (int32)UartCfgTbl[j].iBaudRate) {
@@ -1677,7 +1613,7 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
         }
       }
     } else {
-      PRINT("%d Protocol Version not supported", uiProVer);
+      VND_LOGV("%d Protocol Version not supported", uiProVer);
     }
   }
   return ucResult;
@@ -1726,9 +1662,7 @@ static int32 fw_Change_Timeout()
         if(fw_upload_WaitFor_Req(1)) {
           if(uiNewLen != 0) {
             if(uiNewError == 0) {
-#ifdef DEBUG_PRINT
-              PRINT("\n === Succ: REQ = 0xA7, Errcode = 0 ");
-#endif
+              VND_LOGV(" === Succ: REQ = 0xA7, Errcode = 0 ");
               if(bFirst || ulLastOffsetToSend == ulNewOffset) {
                 fw_upload_Send_Ack(V3_REQUEST_ACK);
                 fw_upload_ComWriteChars(mchar_fd, m_Buffer_CMD7_ChangeTimeoutValue, uiNewLen);
@@ -1755,7 +1689,7 @@ static int32 fw_Change_Timeout()
           break;
       }
     } else {
-      PRINT("\n wait for head sig tiemout\n");
+      VND_LOGV(" wait for head sig tiemout");
       break;
     }
   }
@@ -1790,15 +1724,15 @@ int bt_send_cmd5_data_ver3(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5)
           if (header_sent == FALSE && uiNewLen == HDR_LEN) {
             fw_upload_ComWriteChars(mchar_fd, cmd5_data, uiNewLen);
             header_sent = TRUE;
-            VNDDBG("Sent CMD5 Header: %d", uiNewLen);
+            VND_LOGD("Sent CMD5 Header: %d", uiNewLen);
           } else if (header_sent == TRUE) {
             fw_upload_ComWriteChars(mchar_fd, cmd5_data + HDR_LEN, uiNewLen);
             header_sent = FALSE;
             ret_value = 0;
             cmd5_len = uiNewLen + HDR_LEN;
-            VNDDBG("Sent CMD5 payload: %d", uiNewLen);
+            VND_LOGD("Sent CMD5 payload: %d", uiNewLen);
           } else {
-            VNDDBG(
+            VND_LOGE(
                 "Unexpected Error CMD5 uiNewLen = %d uiNewError = %d "
                 "header_sent=%d",
                 uiNewLen, uiNewError, header_sent);
@@ -1850,25 +1784,25 @@ int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
     while (retry--) {
       uiLenToSend = fw_upload_WaitFor_Len(NULL);
       if (uiLenToSend != HDR_LEN) {
-        PRINT("Unexpected Header Length Received: %d", uiLenToSend);
+        VND_LOGV("Unexpected Header Length Received: %d", uiLenToSend);
         /* If expected header length is invalid, check after signature header
          */
         if (fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC) == FALSE) {
-          PRINT("Header Signature Timeout CMD5 not Sent");
+          VND_LOGV("Header Signature Timeout CMD5 not Sent");
           return ret_value;
         }
         if (retry == 0) {
           return ret_value;
         }
       } else {
-        PRINT("CMD5 bootloader length check completed");
+        VND_LOGV("CMD5 bootloader length check completed");
         break;
       }
     }
     tcflush(mchar_fd, TCIFLUSH);
     ret_value =
         fw_upload_SendBuffer(HDR_LEN, cmd5_data, !read_sig_hdr_after_cmd5);
-    PRINT("CMD5 sent succesfully");
+    VND_LOGV("CMD5 sent succesfully");
   }
   return ret_value;
 }
@@ -1893,12 +1827,12 @@ void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size) {
         memset(fw_name, 0, fw_name_size);
         strcpy(fw_name, FW_DEFAULT_PATH);
         strcat(fw_name, soc_fw_name_dict[i].default_fw_name);
-        VNDDBG("Default Firmware selected= %s", fw_name);
+        VND_LOGI("Auto-selected Firmware= %s", fw_name);
         break;
       }
     }
     if (i == size_of_array) {
-      ALOGE("Unable to Map Chip ID %04x to FW Name, using default FW name",
+      VND_LOGE("Unable to Map Chip ID %04x to FW Name, using default FW name",
             chip_id);
     }
   }
@@ -1915,11 +1849,11 @@ void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size) {
  * Return Value: Pointer to FW Config CMD5 if success or NULL
  *****************************************************************************/
 static uint8* bt_get_fw_config_cmd5_data(void) {
-  VNDDBG("Opening CMD5 file");
+  VND_LOGD("Opening CMD5 file");
   FILE* fp = fopen(pFilename_fw_init_config_bin, "r");
   uint8* ret = NULL;
   if (fp == NULL) {
-    VNDDBG("%s file not found : error %s ", pFilename_fw_init_config_bin,
+    VND_LOGD("%s file not found : error %s ", pFilename_fw_init_config_bin,
            strerror(errno));
   } else {
     /*Make sure length of file is in limit and copied in fw_init_config_bin */
@@ -1933,7 +1867,7 @@ static uint8* bt_get_fw_config_cmd5_data(void) {
                 : NULL;
     }
     fclose(fp);
-    VNDDBG("Closing CMD5 file");
+    VND_LOGD("Closing CMD5 file");
   }
   return ret;
 }
@@ -1980,7 +1914,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   pFile = fopen(pFileName, "rb");
 
   if (pFile == NULL) {
-    PRINT("\nfile open failed\n");
+    VND_LOGV("file open failed");
     return OPEN_FILE_FAIL;
   }
 
@@ -2003,15 +1937,14 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     result = fw_Change_Baudrate(pPortName, iBaudRate, iSecondBaudRate, bFirstWaitHeaderSignature);
     switch (result) {
       case -1:
-        PRINT("\nSecond baud rate %d is not support\n", iSecondBaudRate);
-        PRINT("\nFw loader only supports the baud rate as");
+        VND_LOGV("Second baud rate %d is not support", iSecondBaudRate);
+        VND_LOGV("Fw loader only supports the baud rate as");
         for (j = 0; j < sizeof(UartCfgTbl) / sizeof(UART_BAUDRATE); j++) {
-          PRINT(" %d ", UartCfgTbl[j].iBaudRate);
+          VND_LOGV(" %d ", UartCfgTbl[j].iBaudRate);
         }
-        PRINT("\n");
         break;
       case -2:
-        PRINT("\n0xa5 or 0xaa is not received after changing baud rate in 2s.\n");
+        VND_LOGV("0xa5 or 0xaa is not received after changing baud rate in 2s.");
         break;
       default:
         break;
@@ -2023,7 +1956,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   }
 
 #if ((UART_DOWNLOAD_FW == TRUE) )
-  VNDDBG("Sending FW Config");
+  VND_LOGD("Sending FW Config");
   if (send_fw_config_cmd5 == TRUE) {
     if (((uiProVer == Ver1) &&
          ((uiLenToSend = bt_send_cmd5_data_ver1(bt_get_fw_config_cmd5_data(),
@@ -2031,25 +1964,25 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
         ((uiProVer == Ver3) &&
          (bt_send_cmd5_data_ver3(bt_get_fw_config_cmd5_data(), TRUE) == 0))) {
       check_sig_hdr = FALSE;
-      PRINT("\n ========== Download Complete FW CONFIG=========\n\n");
+      VND_LOGV(" ========== Download Complete FW CONFIG=========");
     } else {
-      VNDDBG("Sending FW config CMD5 FAILED protocol version %d", uiProVer + 1);
+      VND_LOGD("Sending FW config CMD5 FAILED protocol version %d", uiProVer + 1);
     }
     send_fw_config_cmd5 = FALSE;
   }
 #endif
   // Calculate the size of the file to be downloaded.
-  VNDDBG("Opening FW file");
+  VND_LOGD("Opening FW file");
   result = fseek(pFile, 0, SEEK_END);
   if (result != 0) {
-    PRINT("\nfseek failed\n");
+    VND_LOGV("fseek failed");
     fclose(pFile);
     return FEEK_SEEK_ERROR;
   }
 
   ulTotalFileSize = (long)ftell(pFile);
   if (ulTotalFileSize <= 0) {
-    PRINT("\nError:Download Size is 0\n");
+    VND_LOGV("Error:Download Size is 0");
     fclose(pFile);
     return FILESIZE_IS_ZERO;
   }
@@ -2057,14 +1990,14 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   pFileBuffer = (uint8 *) malloc(ulTotalFileSize);
   if(pFileBuffer == NULL)
   {
-    PRINT("malloc() returned NULL while allocating size for file");
+    VND_LOGV("malloc() returned NULL while allocating size for file");
     fclose(pFile);
     return MALLOC_RETURNED_NULL;
   }
 
   result = fseek(pFile, 0, SEEK_SET);
   if (result != 0) {
-    PRINT("\nfseek() failed");
+    VND_LOGV("fseek() failed");
     free(pFileBuffer);
     fclose(pFile);
     return FEEK_SEEK_ERROR;
@@ -2073,17 +2006,17 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
   if (pFileBuffer != (void *)0) {
     ulReadLen = (uint32)fread((void *)pFileBuffer, 1, ulTotalFileSize, pFile);
     if (ulReadLen != ulTotalFileSize) {
-      PRINT("\nError:Read File Fail\n");
+      VND_LOGV("Error:Read File Fail");
       free(pFileBuffer);
       fclose(pFile);
       return READ_FILE_FAIL;
     }
   }
    ulCurrFileSize = 0;
-  VNDDBG("Closing FW file");
+  VND_LOGD("Closing FW file");
   // Jump to here in case of protocol resync.
   if(setjmp(resync) > 1) {
-    PRINT("\nSome error occured");
+    VND_LOGV("Some error occured");
     free(pFileBuffer);
     return UNEXPECTED_BEHAVIOUR_IN_SETJMP;
   }
@@ -2092,7 +2025,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     // Wait to Receive 0xa5, 0xaa, 0xab, 0xa7
     if (check_sig_hdr && (!iSecondBaudRate) &&
         (!fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC))) {
-      PRINT("\n0xa5,0xaa,0xab or 0xa7 is not received in %d ms\n",
+      VND_LOGV("0xa5,0xaa,0xab or 0xa7 is not received in %d ms",
             TIMEOUT_VAL_MILLISEC);
       free(pFileBuffer);
       fclose(pFile);
@@ -2103,12 +2036,12 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
       if (check_sig_hdr) {
         uiLenToSend = fw_upload_WaitFor_Len(pFile);
       }
-      PRINT("Number of bytes to be downloaded: %8ld\r", ulTotalFileSize);
+      VND_LOGV("Number of bytes to be downloaded: %8ld\r", ulTotalFileSize);
       tcflush(mchar_fd, TCIFLUSH);
       do {
         uiLenToSend = fw_upload_V1SendLenBytes(pFileBuffer, uiLenToSend);
       } while (uiLenToSend != 0);
-      PRINT("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
+      VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
       // If the Length requested is 0, download is complete.
       if (uiLenToSend == 0) {
         bRetVal = TRUE;
@@ -2118,24 +2051,18 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
       if(fw_upload_WaitFor_Req(0)) {
         if (uiNewLen != 0) {
           if (uiNewError == 0) {
-#ifdef DEBUG_PRINT
-            PRINT("\n === Succ: REQ = 0xA7, Errcode = 0 ");
-#endif
+            VND_LOGV(" === Succ: REQ = 0xA7, Errcode = 0 ");
             fw_upload_Send_Ack(V3_REQUEST_ACK);
             fw_upload_V3SendLenBytes(pFileBuffer, uiNewLen, ulNewOffset);
 
-#ifdef DEBUG_PRINT
-            PRINT("\n sent %d bytes..\n", uiNewLen);
-#endif
+            VND_LOGV(" sent %d bytes..", uiNewLen);
           } else  // NAK,TIMEOUT,INVALID COMMAND...
           {
-#ifdef DEBUG_PRINT
             uint8 i;
-            PRINT("\n === Fail: REQ = 0xA7, Errcode != 0 ");
+            VND_LOGV(" === Fail: REQ = 0xA7, Errcode != 0 ");
             for (i = 0; i < 7; i++) {
               uiErrCnt[i] += (uiNewError >> i) & 0x1;
             }
-#endif
             tcflush(mchar_fd, TCIFLUSH);
             fw_upload_Send_Ack(V3_TIMEOUT_ACK);
             if(uiNewError & BT_MIC_FAIL_BIT)
@@ -2153,9 +2080,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
             bRetVal = TRUE;
             break;
           } else if (uiNewError & BT_MIC_FAIL_BIT) {
-  #ifdef DEBUG_PRINT
             uiErrCnt[7] += 1;
-  #endif
             fw_upload_Send_Ack(V3_REQUEST_ACK);
             fseek(pFile, 0, SEEK_SET);
             change_baudrata_buffer_len = 0;
@@ -2163,14 +2088,14 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
             ulCurrFileSize = 0;
             ulLastOffsetToSend = 0xFFFF;
           } else {
-            PRINT("Non-empty terminating else statement uiNewError = %d",
+            VND_LOGV("Non-empty terminating else statement uiNewError = %d",
                   uiNewError);
           }
         }
       }
-      PRINT("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
+      VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
     } else {
-      PRINT("%d Protocol Version not supported", uiProVer);
+      VND_LOGV("%d Protocol Version not supported", uiProVer);
     }
     iSecondBaudRate = 0;
     check_sig_hdr = TRUE;
@@ -2212,14 +2137,14 @@ BOOLEAN bt_vnd_mrvl_check_fw_status() {
   BOOLEAN bRetVal = FALSE;
 
   if (mchar_fd < 0) {
-    printf("\nPort is not open or file not found\n");
+    VND_LOGE("Port is not open or file not found");
     return bRetVal;
   }
 
   // Wait to Receive 0xa5, 0xaa, 0xab, 0xa7
   bRetVal = fw_upload_WaitForHeaderSignature(1000);
 
-  printf("fw_upload_WaitForHeaderSignature return %d", bRetVal);
+  VND_LOGD("fw_upload_WaitForHeaderSignature return %d", bRetVal);
 
   return bRetVal;
 }
@@ -2257,41 +2182,41 @@ int bt_vnd_mrvl_download_fw(int8 *pPortName, int32 iBaudrate, int8 *pFileName, i
 
   start = fw_upload_GetTime();
 
-  printf("Protocol: NXP Proprietary\n");
-  printf("FW Loader Version: %s\n", VERSION);
-  printf("ComPort : %s\n", pPortName);
-  printf("BaudRate: %d\n", iBaudrate);
-  printf("Filename: %s\n", pFileName);
-  printf("iSecondBaudrate: %d\n", iSecondBaudrate);
+  VND_LOGI("Protocol: NXP Proprietary");
+  VND_LOGI("FW Loader Version: %s", VERSION);
+  VND_LOGD("ComPort : %s", pPortName);
+  VND_LOGD("BaudRate: %d", iBaudrate);
+  VND_LOGD("Filename: %s", pFileName);
+  VND_LOGD("iSecondBaudrate: %d", iSecondBaudrate);
 
   ulResult = fw_upload_FW(pPortName, iBaudrate, pFileName, iSecondBaudrate);
   if (ulResult == 0) {
-    printf("\nDownload Complete\n");
+    VND_LOGI("Download Complete");
     cost = fw_upload_GetTime() - start;
-    printf("time:%llu\n", cost);
+    VND_LOGD("time:%llu", cost);
     if (uiProVer == Ver1) {
       fw_upload_DelayInMs(MAX_CTS_TIMEOUT);
       endTime = fw_upload_GetTime() + MAX_CTS_TIMEOUT;
       do {
         if (!fw_upload_ComGetCTS(mchar_fd)) {
-          printf("CTS is low\n");
+          VND_LOGD("CTS is low");
           goto done;
         }
       } while (endTime > fw_upload_GetTime());
-      printf("wait CTS low timeout \n");
+      VND_LOGE("wait CTS low timeout ");
       goto done;
     } else if (uiProVer == Ver3) {
       endTime = fw_upload_GetTime() + END_SIG_TIMEOUT;
       do {
         if (!fw_upload_ComGetCTS(mchar_fd)) {
-          printf("CTS is low\n");
+          VND_LOGD("CTS is low");
           goto done;
         }
       } while (endTime > fw_upload_GetTime());
       goto done;
     }
   } else {
-    PRINT("\nDownload Error, Error code = %d\n", ulResult);
+    VND_LOGV("Download Error, Error code = %d", ulResult);
     return ulResult;
   }
 

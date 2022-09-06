@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2009-2022 NXP
+ *  Copyright 2009-2021 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,9 +22,8 @@
 #define LOG_TAG "fw_loader_linux"
 #include <cutils/properties.h>
 #include <errno.h>
-#include <log/log.h>
-#define perror(fmt, ...) ALOGE("ERROR : %s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 
+#include "bt_vendor_log.h"
 /*===================== Macros ===================================================*/
 #define TIMEOUT_SEC 6
 
@@ -345,7 +344,7 @@ uint64 fw_upload_GetTime(void) {
   if (!clock_gettime(clk_id, &time)) {
     millsectime = (time.tv_sec * 1000) + (time.tv_nsec / 1000000);
   } else {
-    ALOGE("\n clock_gettime error: %d", errno);
+    VND_LOGE("clock_gettime error: %d", errno);
   }
   return millsectime;
 }

@@ -45,7 +45,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "009.007"
+#define BT_HAL_VERSION "009.008"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -81,17 +81,6 @@ typedef unsigned char BOOLEAN;
 /* Run-time configuration file */
 #ifndef VENDOR_LIB_CONF_FILE
 #define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"
-#endif
-
-#ifndef NXP_VND_DBG
-#define NXP_VND_DBG FALSE
-#endif
-
-#if (NXP_VND_DBG == TRUE)
-#define VNDDBG(fmt, ...) \
-  ALOGD("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
-#else
-#define VNDDBG(fmt, ...)
 #endif
 
 /******************************************************************************

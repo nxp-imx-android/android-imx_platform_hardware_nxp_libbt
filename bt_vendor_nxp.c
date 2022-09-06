@@ -29,7 +29,6 @@
 #include <cutils/properties.h>
 #include <errno.h>
 #include <grp.h>
-#include <log/log.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <sched.h>
@@ -49,6 +48,7 @@
 
 #include <linux/gpio.h>
 #include "bt_vendor_nxp.h"
+#include "bt_vendor_log.h"
 /******************************************************************************
  **
  ** Constants and Macro's
@@ -78,6 +78,7 @@
 **  Variables
 ******************************************************************************/
 int mchar_fd = 0;
+int vhal_trace_level = BT_TRACE_LEVEL_INFO;
 struct termios ti;
 static uint8_t adapterState;
 unsigned char* bdaddr = NULL;
@@ -187,14 +188,6 @@ static int set_mbt_port(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
   strcpy(mbt_port, p_conf_value);
-  is_uart_port = 0;
-  return 0;
-}
-
-static int set_is_uart_port(char* p_conf_name, char* p_conf_value, int param) {
-  UNUSED(p_conf_name);
-  UNUSED(param);
-  is_uart_port = atoi(p_conf_value);
   return 0;
 }
 
@@ -388,7 +381,13 @@ static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
   strcpy(pFilename_cal_data, p_conf_value);
   return 0;
 }
-
+static int set_vhal_trace_level(char* p_conf_name, char* p_conf_value,
+                                int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  vhal_trace_level = atoi(p_conf_value);
+  return 0;
+}
 static int set_enable_heartbeat_config(char* p_conf_name, char* p_conf_value,
                                        int param) {
   UNUSED(p_conf_name);
@@ -456,7 +455,7 @@ static int set_wakeup_adv_pattern(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
   if (wakeup_adv_config.length >= NXP_WAKEUP_ADV_PATTERN_LENGTH) {
-    VNDDBG("%s, wrong length:%d\n", __func__, wakeup_adv_config.length);
+    VND_LOGE("%s, wrong length:%d", __func__, wakeup_adv_config.length);
     return -1;
   }
   wakeup_adv_config.adv_pattern[wakeup_adv_config.length] =
@@ -523,7 +522,6 @@ static int set_wakeup_local_heartbeat_timer_value(char* p_conf_name,
 static const conf_entry_t conf_table[] = {
     {"mchar_port", set_mchar_port, 0},
     {"mbt_port", set_mbt_port, 0},
-    {"is_uart_port", set_is_uart_port, 0},
     {"baudrate_bt", set_baudrate_bt, 0},
     {"baudrate_fw_init", set_baudrate_fw_init, 0},
     {"bd_address", set_bd_address_buf, 0},
@@ -547,6 +545,7 @@ static const conf_entry_t conf_table[] = {
     {"enable_poke_controller", set_enable_poke_controller, 0},
 #endif
     {"pFilename_cal_data", set_Filename_cal_data, 0},
+    {"vhal_trace_level", set_vhal_trace_level, 0},
     {"enable_sco_config", set_enable_sco_config, 0},
     {"use_controller_addr", set_use_controller_addr, 0},
     {"enable_heartbeat_config", set_enable_heartbeat_config, 0},
@@ -583,7 +582,7 @@ static void vnd_load_conf(const char* p_path) {
   conf_entry_t* p_entry;
   char line[CONF_MAX_LINE_LEN + 1]; /* add 1 for \0 char */
 
-  ALOGI("Attempt to load conf from %s", p_path);
+  VND_LOGD("Attempt to load conf from %s", p_path);
 
   if ((p_file = fopen(p_path, "r")) != NULL) {
     /* read line by line */
@@ -617,27 +616,8 @@ static void vnd_load_conf(const char* p_path) {
 
     fclose(p_file);
   } else {
-    ALOGI("vnd_load_conf file >%s< not found", p_path);
+    VND_LOGW("vnd_load_conf file >%s< not found", p_path);
   }
-}
-
-static int set_speed(int fd, struct termios* ti, int speed) {
-  if (cfsetospeed(ti, speed) < 0) {
-    VNDDBG("Set O speed failed!\n");
-    return -1;
-  }
-
-  if (cfsetispeed(ti, speed) < 0) {
-    VNDDBG("Set I speed failed!\n");
-    return -1;
-  }
-
-  if (tcsetattr(fd, TCSANOW, ti) < 0) {
-    VNDDBG("Set Attr speed failed!\n");
-    return -1;
-  }
-
-  return 0;
 }
 
 /******************************************************************************
@@ -661,11 +641,11 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
 
   /* The first byte identifies the packet type. For HCI event packets, it
    * should be 0x04, so we read until we get to the 0x04. */
-  VNDDBG("start read hci event 0x4\n");
+  VND_LOGD("start read hci event 0x4");
   while (k < 20) {
     r = read(fd, buf, 1);
     if (r <= 0) {
-      VNDDBG("read hci event 0x04 failed, retry\n");
+      VND_LOGD("read hci event 0x04 failed, retry");
       k++;
       usleep(retry_delay_ms * 1000);
       continue;
@@ -673,24 +653,24 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
     if (buf[0] == 0x04) break;
   }
   if (k >= 20) {
-    VNDDBG("read hci event 0x04 failed, return error. k = %d\n", k);
+    VND_LOGE("read hci event 0x04 failed, return error. k = %d", k);
     return -1;
   }
   count++;
 
   /* The next two bytes are the event code and parameter total length. */
-  VNDDBG("start read hci event code and len\n");
+  VND_LOGD("start read hci event code and len");
   while (count < 3) {
     r = read(fd, buf + count, 3 - count);
     if (r <= 0) {
-      VNDDBG("read hci event code and len failed\n");
+      VND_LOGE("read hci event code and len failed");
       return -1;
     }
     count += r;
   }
 
   /* Now we read the parameters. */
-  VNDDBG("start read hci event para\n");
+  VND_LOGD("start read hci event para");
   if (buf[2] < (size - 3))
     remain = buf[2];
   else
@@ -699,13 +679,13 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
   while ((count - 3) < remain) {
     r = read(fd, buf + count, remain - (count - 3));
     if (r <= 0) {
-      VNDDBG("read hci event para failed\n");
+      VND_LOGE("read hci event para failed");
       return -1;
     }
     count += r;
   }
 
-  VNDDBG("over read count = %d\n", count);
+  VND_LOGD("over read count = %d", count);
   return count;
 }
 
@@ -716,7 +696,7 @@ int set_prop_int32(char* name, int value) {
   sprintf(init_value, "%d", value);
   ret = property_set(name, init_value);
   if (ret < 0) {
-    ALOGE("set_prop_int32 failed: %d", ret);
+    VND_LOGE("set_prop_int32 failed: %d", ret);
   }
   return ret;
 }
@@ -725,7 +705,7 @@ int get_prop_int32(char* name) {
   int ret;
 
   ret = property_get_int32(name, -1);
-  VNDDBG("get_prop_int32: %d", ret);
+  VND_LOGD("get_prop_int32: %d", ret);
   if (ret < 0) {
     return 0;
   }
@@ -848,8 +828,22 @@ static int32 uart_get_speed(struct termios* ti) {
  *****************************************************************************/
 
 static int32 uart_set_speed(int32 fd, struct termios* ti, int32 speed) {
-  cfsetospeed(ti, uart_speed(speed));
-  return tcsetattr(fd, TCSANOW, ti);
+  if (cfsetospeed(ti, uart_speed(speed)) < 0) {
+    VND_LOGE("Set O speed failed!");
+    return -1;
+  }
+
+  if (cfsetispeed(ti, uart_speed(speed)) < 0) {
+    VND_LOGE("Set I speed failed!");
+    return -1;
+  }
+
+  if (tcsetattr(fd, TCSANOW, ti) < 0) {
+    VND_LOGE("Set Attr speed failed!");
+    return -1;
+  }
+  VND_LOGD("Baudrate set to %d", speed);
+  return 0;
 }
 
 /******************************************************************************
@@ -865,14 +859,14 @@ static int32 uart_set_speed(int32 fd, struct termios* ti, int32 speed) {
 int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
   int32 fd = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd < 0) {
-    VNDDBG("Can't open serial port");
+    VND_LOGE("Can't open serial port");
     return -1;
   }
 
   tcflush(fd, TCIOFLUSH);
 
   if (tcgetattr(fd, &ti) < 0) {
-    VNDDBG("Can't get port settings");
+    VND_LOGE("Can't get port settings");
     close(fd);
     return -1;
   }
@@ -899,18 +893,18 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
   ti.c_cc[VTIME] = TIMEOUT_SEC * 10;
 
   if (tcsetattr(fd, TCSANOW, &ti) < 0) {
-    VNDDBG("Can't set port settings");
+    VND_LOGE("Can't set port settings");
     close(fd);
     return -1;
   }
   tcflush(fd, TCIOFLUSH);
   if (independent_reset_mode == IR_MODE_INBAND_VSC) {
     last_baudrate = uart_get_speed(&ti);
-    VNDDBG("Last buad rate = %d", last_baudrate);
+    VND_LOGD("Last buad rate = %d", last_baudrate);
   }
   /* Set actual baudrate */
   if (uart_set_speed(fd, &ti, dwBaudRate) < 0) {
-    VNDDBG("Can't set baud rate");
+    VND_LOGD("Can't set baud rate");
     close(fd);
     return -1;
   }
@@ -935,10 +929,10 @@ static int uart_init_open(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
     if (fd < 0) {
       num++;
       if (num >= 8) {
-        ALOGE("exceed max retry count, return error\n");
+        VND_LOGE("exceed max retry count, return error");
         return -1;
       } else {
-        ALOGE("open uart port %s failed fd: %d, retrying\n", dev, fd);
+        VND_LOGW("open uart port %s failed fd: %d, retrying", dev, fd);
         usleep(50 * 1000);
         continue;
       }
@@ -979,7 +973,7 @@ static int detect_and_download_fw() {
                                              pFileName_helper, iSecondBaudrate);
 #endif
       if (download_ret != 0) {
-        VNDDBG("helper download failed");
+        VND_LOGE("helper download failed");
         goto done;
       }
 
@@ -1006,7 +1000,7 @@ static int detect_and_download_fw() {
                                            pFileName_image, iSecondBaudrate);
 #endif
     if (download_ret != 0) {
-      VNDDBG("fw download failed");
+      VND_LOGE("fw download failed");
       goto done;
     }
 
@@ -1046,72 +1040,72 @@ static int config_uart() {
   if (baudrate_fw_init != baudrate_bt) {
     /* set baud rate to baudrate_fw_init */
     if (uart_set_speed(mchar_fd, &ti, baudrate_fw_init) < 0) {
-      VNDDBG("Can't set baud rate");
+      VND_LOGE("Can't set baud rate");
       return -1;
     }
 
     /* Sending HCI reset CMD  */
-    VNDDBG("start send bt hci reset\n");
+    VND_LOGD("start send bt hci reset");
     memset(resp, 0x00, 10);
     clen = sizeof(reset_cmd);
-    VNDDBG("Write HCI Reset command\n");
+    VND_LOGD("Write HCI Reset command");
     if (write(mchar_fd, reset_cmd, clen) != clen) {
-      VNDDBG("Failed to write reset command \n");
+      VND_LOGE("Failed to write reset command");
       return -1;
     }
 
     if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS)) <
             0 ||
         memcmp(resp, resp_cmp_reset, 7)) {
-      VNDDBG("Failed to read HCI RESET CMD response! \n");
+      VND_LOGE("Failed to read HCI RESET CMD response!");
       return -1;
     }
-    VNDDBG("over send bt hci reset\n");
+    VND_LOGD("over send bt hci reset");
 
     /* Set bt chip Baud rate CMD */
-    VNDDBG("start set fw baud rate according to baudrate_bt\n");
+    VND_LOGD("start set fw baud rate according to baudrate_bt");
     clen = sizeof(set_speed_cmd);
     if (baudrate_bt == 3000000) {
-      VNDDBG("set fw baudrate as 3000000\n");
+      VND_LOGD("set fw baudrate as 3000000");
       if (write(mchar_fd, set_speed_cmd_3m, clen) != clen) {
-        VNDDBG("Failed to write set baud rate command \n");
+        VND_LOGE("Failed to write set baud rate command");
         return -1;
       }
     } else if (baudrate_bt == 115200) {
-      VNDDBG("set fw baudrate as 115200");
+      VND_LOGD("set fw baudrate as 115200");
       if (write(mchar_fd, set_speed_cmd, clen) != clen) {
-        VNDDBG("Failed to write set baud rate command \n");
+        VND_LOGE("Failed to write set baud rate command");
         return -1;
       }
     }
     usleep(60000); /* Sleep to allow baud rate setting to happen in FW */
 
-    VNDDBG("start read hci event\n");
+    VND_LOGD("start read hci event");
     memset(resp, 0x00, 10);
     if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS)) <
             0 ||
         memcmp(resp, resp_cmp, 7)) {
-      VNDDBG("Failed to read set baud rate command response! \n");
+      VND_LOGE("Failed to read set baud rate command response! ");
       return -1;
     }
-    VNDDBG("over send bt chip baudrate\n");
+    VND_LOGD("over send bt chip baudrate");
 
     /* set host uart speed according to baudrate_bt */
-    VNDDBG("start set host baud rate as baudrate_bt\n");
+    VND_LOGD("start set host baud rate as baudrate_bt");
     tcflush(mchar_fd, TCIOFLUSH);
-    if (set_speed(mchar_fd, &ti, uart_speed(baudrate_bt))) {
-      VNDDBG("Failed to  set baud rate \n");
+    if (uart_set_speed(mchar_fd, &ti, baudrate_bt)) {
+      VND_LOGE("Failed to  set baud rate ");
       return -1;
     }
     ti.c_cflag |= CRTSCTS;
     if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
-      VNDDBG("Set Flow Control failed!\n");
+      VND_LOGE("Set Flow Control failed!");
       return -1;
     }
     tcflush(mchar_fd, TCIOFLUSH);
   } else {
     /* set host uart speed according to baudrate_bt */
-    VNDDBG("start set host baud rate as baudrate_bt\n");
+    VND_LOGD("start set host baud rate as baudrate_bt");
     tcflush(mchar_fd, TCIOFLUSH);
 
     /* Close and open the port as setting baudrate to baudrate_bt */
@@ -1148,12 +1142,12 @@ static int bt_vnd_init_rfkill() {
     snprintf(path, sizeof(path), "/sys/class/rfkill/rfkill%d/type", id);
     fd = open(path, O_RDONLY);
     if (fd < 0) {
-      ALOGE("open(%s) failed: %s (%d)\n", path, strerror(errno), errno);
+      VND_LOGE("open(%s) failed: %s (%d)", path, strerror(errno), errno);
       break;
     }
     sz = read(fd, &buf, sizeof(buf));
     if (sz < 0) {
-      ALOGE("read failed: %s (%d)\n", strerror(errno), errno);
+      VND_LOGE("read failed: %s (%d)", strerror(errno), errno);
     }
     close(fd);
     if (sz >= 9 && memcmp(buf, "bluetooth", 9) == 0) {
@@ -1163,11 +1157,11 @@ static int bt_vnd_init_rfkill() {
   }
 
   if (rfkill_id == -1) {
-    ALOGE("bluetooth rfkill not found\n");
+    VND_LOGE("bluetooth rfkill not found");
     return -1;
   } else {
     asprintf(&rfkill_state_path, "/sys/class/rfkill/rfkill%d/state", rfkill_id);
-    VNDDBG("rfkill_state_path set to %s \n", rfkill_state_path);
+    VND_LOGD("rfkill_state_path set to %s ", rfkill_state_path);
     return 0;
   }
 }
@@ -1179,8 +1173,8 @@ int bt_vnd_set_bluetooth_power(BOOLEAN bt_turn_on) {
   char buffer = bt_turn_on ? '1' : '0';
   /* check if we have rfkill interface */
   if (bt_vnd_is_rfkill_disabled()) {
-    VNDDBG("rfkill disabled, ignoring bluetooth power %s\n",
-           bt_turn_on ? "ON" : "OFF");
+    VND_LOGD("rfkill disabled, ignoring bluetooth power %s",
+             bt_turn_on ? "ON" : "OFF");
     ret = 0;
     goto done;
   }
@@ -1193,14 +1187,14 @@ int bt_vnd_set_bluetooth_power(BOOLEAN bt_turn_on) {
 
   fd = open(rfkill_state_path, O_WRONLY);
   if (fd < 0) {
-    ALOGE("open(%s) for write failed: %s (%d)", rfkill_state_path,
-          strerror(errno), errno);
+    VND_LOGE("open(%s) for write failed: %s (%d)", rfkill_state_path,
+             strerror(errno), errno);
     goto done;
   }
   sz = write(fd, &buffer, 1);
   if (sz < 0) {
-    ALOGE("write(%s) failed: %s (%d)", rfkill_state_path, strerror(errno),
-          errno);
+    VND_LOGE("write(%s) failed: %s (%d)", rfkill_state_path, strerror(errno),
+             errno);
   }
   ret = 0;
 
@@ -1210,6 +1204,7 @@ done:
   }
   return ret;
 }
+
 void bt_vnd_gpio_configuration(int value) {
   struct gpiohandle_request req;
   struct gpiohandle_data data;
@@ -1218,7 +1213,7 @@ void bt_vnd_gpio_configuration(int value) {
   /* Open device: gpiochip0 for GPIO bank A */
   fd = open(chrdev_name, 0);
   if (fd == -1) {
-    ALOGE("Failed to open %s %s\n", chrdev_name, strerror(errno));
+    VND_LOGW("Failed to open %s %s", chrdev_name, strerror(errno));
     return;
   }
   /* Request GPIO Direction line as out */
@@ -1229,12 +1224,13 @@ void bt_vnd_gpio_configuration(int value) {
   ret = ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req);
 
   if (ret == -1) {
-    ALOGE("%s Failed to issue GET LINEHANDLE IOCTL(%d)", strerror(errno), ret);
+    VND_LOGE("%s Failed to issue GET LINEHANDLE IOCTL(%d)", strerror(errno),
+             ret);
     close(fd);
     return;
   }
   if (close(fd) == -1) {
-    ALOGE("Failed to close GPIO character device file");
+    VND_LOGE("Failed to close GPIO character device file");
     return;
   }
   /* Get the value of line */
@@ -1242,26 +1238,26 @@ void bt_vnd_gpio_configuration(int value) {
   ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
   if (ret == -1) {
     close(req.fd);
-    ALOGE("%s failed to issue GET LINEHANDLE", strerror(errno));
+    VND_LOGE("%s failed to issue GET LINEHANDLE", strerror(errno));
     return;
   }
-  VNDDBG("Current Value of line=: %d\n", data.values[0]);
+  VND_LOGD("Current Value of line=: %d", data.values[0]);
 
   /* Set the requested value to the line*/
   data.values[0] = value;
   ret = ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data);
   if (ret == -1) {
     close(req.fd);
-    ALOGE("%s failed to issue SET LINEHANDLE", strerror(errno));
+    VND_LOGE("%s failed to issue SET LINEHANDLE", strerror(errno));
     return;
   }
   ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
-  VNDDBG("Updated Value of Line:= %d\n", data.values[0]);
+  VND_LOGD("Updated Value of Line:= %d", data.values[0]);
 
   /*  release line */
   ret = close(req.fd);
   if (ret == -1) {
-    ALOGE("%s Failed to close GPIO LINEHANDLE device file", strerror(errno));
+    VND_LOGW("%s Failed to close GPIO LINEHANDLE device file", strerror(errno));
     return;
   }
 }
@@ -1285,37 +1281,37 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
   if (get_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED) == 1) {
     if (last_baudrate != baudrate) {
       if (uart_set_speed(mchar_fd, &ti, last_baudrate) < 0) {
-        VNDDBG("Can't set last baud rate %d\n", last_baudrate);
+        VND_LOGE("Can't set last baud rate %d", last_baudrate);
         close(mchar_fd);
         return -1;
       } else {
-        VNDDBG("Baud rate changed from %d to %d\n", baudrate, last_baudrate);
+        VND_LOGD("Baud rate changed from %d to %d", baudrate, last_baudrate);
       }
     }
     cmd_resp_len = sizeof(inband_reset_cmd);
     tcflush(mchar_fd, TCIOFLUSH);
     if (write(mchar_fd, inband_reset_cmd, cmd_resp_len) != cmd_resp_len) {
-      VNDDBG("Failed to write in-band reset command \n");
+      VND_LOGE("Failed to write in-band reset command ");
       return -1;
     } else {
-      VNDDBG("start read hci event\n");
+      VND_LOGD("start read hci event");
       cmd_resp_len = sizeof(inband_reset_resp);
       memset(hci_resp, 0x00, cmd_resp_len);
       if ((cmd_resp_len != read_hci_event(mchar_fd, hci_resp, cmd_resp_len,
                                           POLL_INBAND_COMMAND_MS)) ||
           memcmp(hci_resp, inband_reset_resp, cmd_resp_len) != 0) {
-        VNDDBG("Failed to read Inband reset response");
+        VND_LOGE("Failed to read Inband reset response");
         return -1;
       }
-      VNDDBG("=========Inband IR trigger sent succesfully=======");
+      VND_LOGD("=========Inband IR trigger sent succesfully=======");
     }
     if (last_baudrate != baudrate) {
       if (uart_set_speed(mchar_fd, &ti, baudrate) < 0) {
-        VNDDBG("Can't set last baud rate %d\n", baudrate);
+        VND_LOGE("Can't set last baud rate %d", baudrate);
         close(mchar_fd);
         return -1;
       } else {
-        VNDDBG("Baud rate changed from %d to %d\n", last_baudrate, baudrate);
+        VND_LOGD("Baud rate changed from %d to %d", last_baudrate, baudrate);
       }
     }
   }
@@ -1332,19 +1328,23 @@ static int bt_vnd_init(const bt_vendor_callbacks_t* p_cb,
                        unsigned char* local_bdaddr) {
   vnd_cb = p_cb;
   if (vnd_cb == NULL) {
-    VNDDBG("vnd_cb is NULL");
+    VND_LOGE("vnd_cb is NULL");
   }
-  ALOGI("bt_vnd_init\n");
-  ALOGI("bt_vnd_init --- BT Vendor HAL Ver: %s ---\n", BT_HAL_VERSION);
+  ALOGI("bt_vnd_init --- BT Vendor HAL Ver: %s ---", BT_HAL_VERSION);
+  vnd_load_conf(VENDOR_LIB_CONF_FILE);
+  VND_LOGI("Max supported Log Level: %d", VHAL_LOG_LEVEL);
+  VND_LOGI("Selected Log Level:%d", vhal_trace_level);
+  ALOGI(
+      "BT_VHAL Log Level:%d",
+      (vhal_trace_level <= VHAL_LOG_LEVEL ? vhal_trace_level : VHAL_LOG_LEVEL));
   if (local_bdaddr) {
     bdaddr = (unsigned char*)malloc(BD_ADDR_LEN);
     if (bdaddr != NULL) {
       memcpy(bdaddr, local_bdaddr, 6);
-      VNDDBG("bdaddr is %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX\n", bdaddr[0],
-             bdaddr[1], bdaddr[2], bdaddr[3], bdaddr[4], bdaddr[5]);
+      VND_LOGI("bdaddr is %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX", bdaddr[0],
+               bdaddr[1], bdaddr[2], bdaddr[3], bdaddr[4], bdaddr[5]);
     }
   }
-  vnd_load_conf(VENDOR_LIB_CONF_FILE);
   return 0;
 }
 
@@ -1353,24 +1353,24 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
   int ret = 0;
   int local_st = 0;
 
-  VNDDBG("opcode = %d\n", opcode);
+  VND_LOGD("opcode = %d", opcode);
   switch (opcode) {
     case BT_VND_OP_POWER_CTRL: {
       int* state = (int*)param;
 
       if (*state == BT_VND_PWR_OFF) {
-        VNDDBG("power off --------------------------------------*\n");
+        VND_LOGD("power off --------------------------------------*");
         if (enable_heartbeat_config == TRUE) {
           wakeup_kill_heartbeat_thread();
         }
         if (adapterState == BT_VND_PWR_ON) {
-          VNDDBG("BT adapter switches from ON to OFF .. \n");
+          VND_LOGD("BT adapter switches from ON to OFF .. ");
           adapterState = BT_VND_PWR_OFF;
         }
       } else if (*state == BT_VND_PWR_ON) {
-        VNDDBG("power on --------------------------------------\n");
+        VND_LOGD("power on --------------------------------------");
         if (independent_reset_mode == IR_MODE_INBAND_VSC) {
-          VNDDBG("Reset the download status for Inband IR \n");
+          VND_LOGD("Reset the download status for Inband IR ");
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
         }
         adapterState = BT_VND_PWR_ON;
@@ -1383,10 +1383,10 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         if (send_oob_ir_trigger == IR_TRIGGER_GPIO) {
           set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
 
-          VNDDBG("-------------- Setting GPIO LOW -----------------\n");
+          VND_LOGD("-------------- Setting GPIO LOW -----------------");
           bt_vnd_gpio_configuration(FALSE);
           usleep(1000);
-          VNDDBG("---------------- Setting GPIO HIGH ----------------\n");
+          VND_LOGD("---------------- Setting GPIO HIGH ----------------");
           bt_vnd_gpio_configuration(TRUE);
         }
       }
@@ -1401,26 +1401,26 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       }
       break;
     case BT_VND_OP_USERIAL_OPEN: {
-      VNDDBG("open serial port --------------------------------------\n");
+      VND_LOGD("open serial port --------------------------------------");
       int(*fd_array)[] = (int(*)[])param;
       int idx;
       int bluetooth_opened;
       int num = 0;
       int32_t baudrate = 0;
       if (is_uart_port) {
-        VNDDBG("baudrate_bt %d\n", baudrate_bt);
-        VNDDBG("baudrate_fw_init %d\n", baudrate_fw_init);
+        VND_LOGD("baudrate_bt %d", baudrate_bt);
+        VND_LOGD("baudrate_fw_init %d", baudrate_fw_init);
 #ifdef UART_DOWNLOAD_FW
         if (enable_download_fw) {
-          VNDDBG("download_helper %d\n", download_helper);
-          VNDDBG("baudrate_dl_helper %d\n", baudrate_dl_helper);
-          VNDDBG("baudrate_dl_image %d\n", baudrate_dl_image);
-          VNDDBG("pFileName_helper %s\n", pFileName_helper);
-          VNDDBG("pFileName_image %s\n", pFileName_image);
-          VNDDBG("iSecondBaudrate %d\n", iSecondBaudrate);
-          VNDDBG("enable_download_fw %d\n", enable_download_fw);
-          VNDDBG("uart_sleep_after_dl %d\n", uart_sleep_after_dl);
-          VNDDBG("independent_reset_mode %d\n", independent_reset_mode);
+          VND_LOGD("download_helper %d", download_helper);
+          VND_LOGD("baudrate_dl_helper %d", baudrate_dl_helper);
+          VND_LOGD("baudrate_dl_image %d", baudrate_dl_image);
+          VND_LOGD("pFileName_helper %s", pFileName_helper);
+          VND_LOGD("pFileName_image %s", pFileName_image);
+          VND_LOGD("iSecondBaudrate %d", iSecondBaudrate);
+          VND_LOGD("enable_download_fw %d", enable_download_fw);
+          VND_LOGD("uart_sleep_after_dl %d", uart_sleep_after_dl);
+          VND_LOGD("independent_reset_mode %d", independent_reset_mode);
         }
 #endif
       }
@@ -1452,15 +1452,16 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&
               (mchar_fd > 0)) {
             if (bt_vnd_send_inband_ir(baudrate) != 0) {
+              pthread_mutex_unlock(&dev_file_lock);
               return -1;
             }
           }
         }
-        if (mchar_fd > 0)
-          VNDDBG("open uart port successfully, fd=%d, mchar_port=%s\n",
-                 mchar_fd, mchar_port);
-        else {
-          ALOGE("open UART bt port %s failed fd: %d\n", mchar_port, mchar_fd);
+        if (mchar_fd > 0) {
+          VND_LOGI("open uart port successfully, fd=%d, mchar_port=%s",
+                   mchar_fd, mchar_port);
+        } else {
+          VND_LOGE("open UART bt port %s failed fd: %d", mchar_port, mchar_fd);
           pthread_mutex_unlock(&dev_file_lock);
           return -1;
         }
@@ -1468,7 +1469,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 #ifdef UART_DOWNLOAD_FW
         if (enable_download_fw && !get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED)) {
           if (detect_and_download_fw()) {
-            ALOGE("detect_and_download_fw failed");
+            VND_LOGE("detect_and_download_fw failed");
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
             pthread_mutex_unlock(&dev_file_lock);
             return -1;
@@ -1476,7 +1477,8 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         } else {
           ti.c_cflag |= CRTSCTS;
           if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
-            ALOGE("Set Flow Control failed!\n");
+            VND_LOGE("Set Flow Control failed!");
+            pthread_mutex_unlock(&dev_file_lock);
             return -1;
           }
           tcflush(mchar_fd, TCIOFLUSH);
@@ -1484,7 +1486,8 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 #else
         ti.c_cflag |= CRTSCTS;
         if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
-          ALOGE("Set Flow Control failed!\n");
+          VND_LOGE("Set Flow Control failed!");
+          pthread_mutex_unlock(&dev_file_lock);
           return -1;
         }
         tcflush(mchar_fd, TCIOFLUSH);
@@ -1512,7 +1515,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           }
 
           if (config_uart()) {
-            ALOGE("config_uart failed");
+            VND_LOGE("config_uart failed");
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
             pthread_mutex_unlock(&dev_file_lock);
             return -1;
@@ -1524,19 +1527,18 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           if (mchar_fd < 0) {
             num++;
             if (num >= 8) {
-              ALOGE("exceed max retry count, return error");
+              VND_LOGE("exceed max retry count, return error");
               pthread_mutex_unlock(&dev_file_lock);
               return -1;
             } else {
-              ALOGE("open USB/SD port %s failed fd: %d, retrying\n", mbt_port,
-                    mchar_fd);
+              VND_LOGW("open USB/SD port %s failed fd: %d, retrying", mbt_port,
+                       mchar_fd);
               sleep(1);
               continue;
             }
           } else {
-            VNDDBG("open USB or SD port successfully, fd=%d, mbt_port=%s\n",
-                   mchar_fd, mbt_port);
-            is_uart_port = 0;
+            VND_LOGI("open USB or SD port successfully, fd=%d, mbt_port=%s",
+                     mchar_fd, mbt_port);
           }
         } while (mchar_fd < 0);
       }
@@ -1546,7 +1548,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         ret = 1;
       }
       pthread_mutex_unlock(&dev_file_lock);
-      VNDDBG("open serial port over --------------------------------------\n");
+      VND_LOGD("open serial port over --------------------------------------");
     } break;
     case BT_VND_OP_USERIAL_CLOSE:
       /* mBtChar port is blocked on read. Release the port before we close it */
@@ -1563,7 +1565,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         usleep(1000);
         if (mchar_fd) {
           if (close(mchar_fd) < 0) {
-            ALOGE("close serial port failed!\n");
+            VND_LOGE("close serial port failed!");
             ret = -1;
           }
         }
@@ -1588,7 +1590,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 
 /** Closes the interface */
 static void bt_vnd_cleanup(void) {
-  VNDDBG("cleanup ...");
+  VND_LOGD("cleanup ...");
   vnd_cb = NULL;
   if (bdaddr) {
     free(bdaddr);

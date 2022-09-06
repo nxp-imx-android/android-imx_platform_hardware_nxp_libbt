@@ -28,10 +28,9 @@
 #include <malloc.h>
 
 #define LOG_TAG "fw_loader"
-#include <log/log.h>
 #include <cutils/properties.h>
-#define printf(fmt, ...) ALOGE("ERROR : %s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 
+#include "bt_vendor_log.h"
 /*--------------------------------fw_loader_io_linux.c-------------------------*/
 #define TIMEOUT_FOR_READ        4000
 
@@ -40,7 +39,7 @@
 #define VERSION "M206"
 #define MAX_LENGTH 0xFFFF  // Maximum 2 byte value
 #define END_SIG_TIMEOUT 2500
-#define MAX_CTS_TIMEOUT    5000         //5s
+#define MAX_CTS_TIMEOUT    5000         //5s 
 #define STRING_SIZE 6
 #define HDR_LEN 16
 #define CMD4 0x4
@@ -57,8 +56,6 @@
 #define HELPER_HEADR_ACK   0x6a
 #define HELPER_TIMEOUT_ACK 0x6b
 #define VERSION_HEADER     0xaa
-
-#define PRINT(...)         printf(__VA_ARGS__)
 
 /*==================== Typedefs =================================================*/
 
@@ -100,7 +97,7 @@ jmp_buf resync;  // Protocol restart buffer used in timeout cases.
  *
  * Description:
  *   This function basically waits for reception
- *   of character 0xa5 on UART Rx. If no 0xa5 is
+ *   of character 0xa5 on UART Rx. If no 0xa5 is 
  *   received, it will kind of busy wait checking for
  *   0xa5.
  *
@@ -117,7 +114,7 @@ jmp_buf resync;  // Protocol restart buffer used in timeout cases.
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs)
 {
   uint8 ucDone = 0; // signature not Received Yet.
@@ -127,14 +124,12 @@ static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs)
   ucRcvdHeader = 0xFF;
   startTime = fw_upload_GetTime();
   while (!ucDone)
-  {
+  { 
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&ucRcvdHeader,1);
     if ((ucRcvdHeader == BOOT_HEADER) || (ucRcvdHeader == VERSION_HEADER) || (ucRcvdHeader == HELPER_HEADER))
     {
       ucDone = 1;
-#ifdef DEBUG_PRINT
-      PRINT("\nReceived 0x%x ", ucRcvdHeader);
-#endif
+      VND_LOGV("Received 0x%x", ucRcvdHeader);
     }
     else
     {
@@ -172,14 +167,14 @@ static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs)
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static uint16 fw_upload_WaitFor_Len(FILE* pFile)
-{
-  uint8  uiVersion;
+{ 
+  uint8  uiVersion; 
   // Length Variables
   uint16 uiLen = 0x0;
   uint16 uiLenComp = 0x0;
-  // uiLen and uiLenComp are 1's complement of each other.
+  // uiLen and uiLenComp are 1's complement of each other. 
   // In such cases, the XOR of uiLen and uiLenComp will be all 1's
   // i.e 0xffff.
   uint16 uiXorOfLen = 0xFFFF;
@@ -191,39 +186,33 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
   // Check if the length is valid.
   if ((uiLen ^ uiLenComp) == uiXorOfLen) // All 1's
   {
-#ifdef DEBUG_PRINT
-    PRINT("\n bootloader asks for %d bytes \n ", uiLen);
-#endif
+    VND_LOGV("bootloader asks for %d bytes", uiLen);
     // Successful. Send back the ack.
     if ((ucRcvdHeader == BOOT_HEADER) || (ucRcvdHeader == VERSION_HEADER))
     {
       fw_upload_ComWriteChar(mchar_fd, (int8)BOOT_HEADER_ACK);
 	  if (ucRcvdHeader == VERSION_HEADER)
       {
-        // We have received the Chip Id and Rev Num that the
+        // We have received the Chip Id and Rev Num that the 
         // helper intended to send. Ignore the received
 	// Chip Id, Rev Num and proceed to Download.
 	uiVersion = (uiLen >> 8) & 0xF0;
 	uiVersion = uiVersion >> 4;
-	PRINT("Helper Version is: %d\n ", uiVersion);
+	VND_LOGV("Helper Version is: %d", uiVersion);
 	if(ucHelperOn == TRUE)
 	{
 	  fseek(pFile, 0, SEEK_SET);
-	  ulCurrFileSize = 0;
+	  ulCurrFileSize = 0; 
           ulLastOffsetToSend = 0xFFFF;
 	}
         // Ensure any pending write data is completely written
         if (0 == tcdrain(mchar_fd))
         {
-#ifdef DEBUG_PRINT
-          PRINT("\n\t tcdrain succeeded\n");
-#endif
+          VND_LOGV("tcdrain succeeded");
         }
         else
         {
-#ifdef DEBUG_PRINT
-          PRINT("\n\t Version ACK, tcdrain failed with errno = %d\n", errno);
-#endif
+          VND_LOGV("Version ACK, tcdrain failed with errno = %d", errno);
         }
 
         longjmp(resync, 1);
@@ -232,11 +221,9 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
   }
   else
   {
-#ifdef DEBUG_PRINT
-    PRINT("\n    NAK case: bootloader LEN = %x bytes \n ", uiLen);
-    PRINT("\n    NAK case: bootloader LENComp = %x bytes \n ", uiLenComp);
-#endif
-    // Failure due to mismatch.
+    VND_LOGV("NAK case: bootloader LEN = %x bytes", uiLen);
+    VND_LOGV("NAK case: bootloader LENComp = %x bytes", uiLenComp);
+    // Failure due to mismatch.	  
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
     // Start all over again.
     longjmp(resync, 1);
@@ -249,7 +236,7 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
  * Name: fw_upload_GetHeaderStartBytes
  *
  * Description:
- *   This function gets 0xa5 and it's following 4 bytes length.
+ *   This function gets 0xa5 and it's following 4 bytes length.    
  *
  * Conditions For Use:
  *   None.
@@ -263,13 +250,13 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile)
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
 {
   BOOLEAN ucDone = FALSE, ucStringCnt = 0, i;
-
+  
   while (!ucDone)
-  {
+  { 
     ucRcvdHeader = 0xFF;
     fw_upload_ComReadChars(mchar_fd, (uint8 *)&ucRcvdHeader,1);
 
@@ -277,9 +264,8 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
     {
       ucStr[ucStringCnt++] = ucRcvdHeader;
       ucDone = TRUE;
-#ifdef DEBUG_PRINT
-      PRINT("\nReceived 0x%x\n ", ucRcvdHeader);
-#endif
+
+      VND_LOGV("Received 0x%x", ucRcvdHeader);
     }
     else
     {
@@ -300,7 +286,7 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
  * Name: fw_upload_GetLast5Bytes
  *
  * Description:
- *   This function gets last valid request.
+ *   This function gets last valid request.    
  *
  * Conditions For Use:
  *   None.
@@ -314,7 +300,7 @@ static void fw_upload_GetHeaderStartBytes(uint8 *ucStr)
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static void fw_upload_GetLast5Bytes(uint8 *buf)
 {
   uint8  a5cnt, i;
@@ -322,35 +308,29 @@ static void fw_upload_GetLast5Bytes(uint8 *buf)
   uint16 uiTempLen = 0;
   int32  fifosize;
   BOOLEAN alla5times = FALSE;
-
-  // initialise
+  
+  // initialise 
   memset(ucString, 0x00, STRING_SIZE);
 
   fifosize = fw_upload_GetBufferSize(mchar_fd);
-
+  
   fw_upload_GetHeaderStartBytes(ucString);
   fw_upload_lenValid(&uiTempLen, ucString);
 
   if((fifosize < 6) && ((uiTempLen == HDR_LEN) || (uiTempLen == fw_upload_GetDataLen(buf))))
   {
-#ifdef DEBUG_PRINT
-    PRINT("=========>success case\n");
-#endif
+    VND_LOGV("=========>success case");
     uiErrCase = FALSE;
   }
   else // start to get last valid 5 bytes
-  {
-#ifdef DEBUG_PRINT
-    PRINT("=========>fail case\n");
-#endif
+  { 
+    VND_LOGV("=========>fail case");
     while (fw_upload_lenValid(&uiTempLen, ucString) == FALSE)
     {
       fw_upload_GetHeaderStartBytes(ucString);
       fifosize -= 5;
     }
-#ifdef DEBUG_PRINT
-      PRINT("Error cases 1, 2, 3, 4, 5...\n");
-#endif
+      VND_LOGV("Error cases 1, 2, 3, 4, 5...");
       if(fifosize > 5)
       {
         fifosize -= 5;
@@ -369,14 +349,12 @@ static void fw_upload_GetLast5Bytes(uint8 *buf)
             {
               if (ucTemp[i] == BOOT_HEADER)
               {
-                a5cnt ++;
+                a5cnt ++; 
               }
             }
             alla5times = TRUE;
           } while (a5cnt == 5);
-#ifdef DEBUG_PRINT
-          PRINT("a5 count in last 5 bytes: %d\n", a5cnt);
-#endif
+          VND_LOGV("a5 count in last 5 bytes: %d", a5cnt);
           if (fw_upload_lenValid(&uiTempLen, ucTemp) == FALSE)
           {
             for (i = 0; i < (5 - a5cnt); i ++)
@@ -435,11 +413,9 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
         if ((uiFirstChunkSent == 0) || ((uiFirstChunkSent == 1) && uiErrCase == TRUE))
      	{
      	  // Write first 16 bytes of buffer
-#ifdef DEBUG_PRINT
-     	  PRINT("\n====>  Sending first chunk...\n");
-     	  PRINT("\n====>  Sending %d bytes...\n", uiBytesToSend);
-#endif
-     	  fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiBytesToSend);
+        VND_LOGV("====>  Sending first chunk...");
+        VND_LOGV("====>  Sending %d bytes...", uiBytesToSend);
+     	  fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiBytesToSend); 
      	  uiBytesToSend = uiDataLen;
      	  if(uiBytesToSend == HDR_LEN)
      	  {
@@ -457,9 +433,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
       else
       {
      	 // Write remaining bytes
-#ifdef DEBUG_PRINT
-     	PRINT("\n====>  Sending %d bytes...\n", uiBytesToSend);
-#endif
+        VND_LOGV("====>  Sending %d bytes...", uiBytesToSend);
         if(uiBytesToSend != 0)
         {
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)&ucBuf[HDR_LEN], uiBytesToSend);
@@ -470,9 +444,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
         }
         else  //end of bin download
         {
-#ifdef DEBUG_PRINT
-          PRINT("\n ========== Download Complete =========\n\n");
-#endif
+          VND_LOGV("========== Download Complete =========");
      	  return 0;
         }
       }
@@ -486,9 +458,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
         if (uiLenToSend == (HDR_LEN + 1))
         {
           // Send first chunk again
-#ifdef DEBUG_PRINT
-          PRINT("\n1. Resending first chunk...\n");
-#endif
+          VND_LOGV("1. Resending first chunk...");
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, (uiLenToSend - 1));
           uiBytesToSend = uiDataLen;
           uiFirstChunkSent = 0;
@@ -496,9 +466,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
         else if (uiLenToSend == (uiDataLen + 1))
         {
           // Send second chunk again
-#ifdef DEBUG_PRINT
-          PRINT("\n2. Resending second chunk...\n");
-#endif
+          VND_LOGV("2. Resending second chunk...");
           fw_upload_ComWriteChars(mchar_fd, (uint8 *)&ucBuf[HDR_LEN], (uiLenToSend - 1));
           uiBytesToSend = HDR_LEN;
           uiFirstChunkSent = 1;
@@ -507,9 +475,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
       else if (uiLenToSend == HDR_LEN)
       {
         // Out of sync. Restart sending buffer
-#ifdef DEBUG_PRINT
-        PRINT("\n3.  Restart sending the buffer...\n");
-#endif
+        VND_LOGV("3.  Restart sending the buffer...");
         fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucBuf, uiLenToSend);
         uiBytesToSend = uiDataLen;
         uiFirstChunkSent = 0;
@@ -518,15 +484,11 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
     // Ensure any pending write data is completely written
     if (0 == tcdrain(mchar_fd))
     {
-#ifdef DEBUG_PRINT
-      PRINT("\n\t tcdrain succeeded\n");
-#endif
+      VND_LOGV("\t tcdrain succeeded");
     }
     else
     {
-#ifdef DEBUG_PRINT
-      PRINT("\n\t tcdrain failed with errno = %d\n", errno);
-#endif
+      VND_LOGV("\t tcdrain failed with errno = %d", errno);
     }
     if(!ucCmd5Sent && uiFirstChunkSent == 1)
     {
@@ -542,20 +504,15 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
       {
         // Valid length received
         uiValidLen = TRUE;
-#ifdef DEBUG_PRINT
-        PRINT("\n Valid length = %d \n", uiLenToSend);
-#endif
+        VND_LOGV("Valid length = %d", uiLenToSend);
+
         // ACK the bootloader
        	fw_upload_ComWriteChar(mchar_fd, (int8)BOOT_HEADER_ACK);
-#ifdef DEBUG_PRINT
-        PRINT("\n  BOOT_HEADER_ACK 0x5a sent \n");
-#endif
+        VND_LOGV("BOOT_HEADER_ACK 0x5a sent");
       }
     } while (!uiValidLen);
   }
-#ifdef DEBUG_PRINT
-  PRINT("\n ========== Buffer is successfully sent =========\n\n");
-#endif
+  VND_LOGV("========== Buffer is successfully sent =========");
   return uiLenToSend;
 }
 
@@ -564,7 +521,7 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
  * Name: fw_upload_WaitFor_Offset
  *
  * Description:
- *   This function gets offset value from helper.
+ *   This function gets offset value from helper.    
  *
  * Conditions For Use:
  *   None.
@@ -580,11 +537,11 @@ uint16 fw_upload_SendBuffer(uint16 uiLenToSend, uint8 *ucBuf)
  *
  *****************************************************************************/
 static uint32 fw_upload_WaitFor_Offset()
-{
+{  
   uint32 ulOffset = 0x0;
   uint32 ulOffsetComp = 0x0;
 
-  // uiLen and uiLenComp are 1's complement of each other.
+  // uiLen and uiLenComp are 1's complement of each other. 
   // In such cases, the XOR of uiLen and uiLenComp will be all 1's
   // i.e 0xffff.
   uint32 uiXorOfOffset = 0xFFFFFFFF;
@@ -595,18 +552,14 @@ static uint32 fw_upload_WaitFor_Offset()
 
   // Check if the length is valid.
   if ((ulOffset ^ ulOffsetComp) == uiXorOfOffset) // All 1's
-  {
-#ifdef DEBUG_PRINT
-    PRINT("\n    Helper ask for offset %d \n ", ulOffset);
-#endif
+  { 
+    VND_LOGV("Helper ask for offset %d", ulOffset);
   }
   else
   {
-#ifdef DEBUG_PRINT
-    PRINT("\n    NAK case: helper Offset = %x bytes \n ", ulOffset);
-    PRINT("\n    NAK case: helper OffsetComp = %x bytes \n ", ulOffsetComp);
-#endif
-    // Failure due to mismatch.
+    VND_LOGV("NAK case: helper Offset = %x bytes", ulOffset);
+    VND_LOGV("NAK case: helper OffsetComp = %x bytes", ulOffsetComp);
+    // Failure due to mismatch.	  
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
 
     // Start all over again.
@@ -620,7 +573,7 @@ static uint32 fw_upload_WaitFor_Offset()
  * Name: fw_upload_WaitFor_ErrCode
  *
  * Description:
- *   This function gets error code from helper.
+ *   This function gets error code from helper.    
  *
  * Conditions For Use:
  *   None.
@@ -634,13 +587,13 @@ static uint32 fw_upload_WaitFor_Offset()
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static uint16 fw_upload_WaitFor_ErrCode()
 {
   uint16 uiError = 0x0;
   uint16 uiErrorCmp = 0x0;
   uint16 uiXorOfErrCode = 0xFFFF;
-
+  
   // Read the Error Code.
   fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiError, 2);
   fw_upload_ComReadChars(mchar_fd, (uint8 *)&uiErrorCmp, 2);
@@ -648,9 +601,7 @@ static uint16 fw_upload_WaitFor_ErrCode()
   // Check if the Err Code is valid.
   if ((uiError ^ uiErrorCmp) == uiXorOfErrCode) // All 1's
   {
-#ifdef DEBUG_PRINT
-    PRINT("\n    Error Code is %d \n ", uiError);
-#endif
+    VND_LOGV("Error Code is %d", uiError);
     if(uiError == 0)
     {
       // Successful. Send back the ack.
@@ -658,20 +609,16 @@ static uint16 fw_upload_WaitFor_ErrCode()
     }
     else
     {
-#ifdef DEBUG_PRINT
-      PRINT("\n    Helper NAK or CRC or Timeout \n ");
-#endif
+      VND_LOGV("Helper NAK or CRC or Timeout");
       // NAK/CRC/Timeout
       fw_upload_ComWriteChar(mchar_fd, (int8)HELPER_TIMEOUT_ACK);
     }
   }
   else
   {
-#ifdef DEBUG_PRINT
-    PRINT("\n    NAK case: helper ErrorCode = %x bytes \n ", uiError);
-    PRINT("\n    NAK case: helper ErrorCodeComp = %x bytes \n ", uiErrorCmp);
-#endif
-    // Failure due to mismatch.
+    VND_LOGV("NAK case: helper ErrorCode = %x bytes", uiError);
+    VND_LOGV("NAK case: helper ErrorCodeComp = %x bytes", uiErrorCmp);
+    // Failure due to mismatch.	  
     fw_upload_ComWriteChar(mchar_fd, (int8)0xbf);
     // Start all over again.
     longjmp(resync, 1);
@@ -684,7 +631,7 @@ static uint16 fw_upload_WaitFor_ErrCode()
  * Name: fw_upload_SendLenBytesToHelper
  *
  * Description:
- *   This function sends Len bytes to the Helper.
+ *   This function sends Len bytes to the Helper.    
  *
  * Conditions For Use:
  *   None.
@@ -700,19 +647,17 @@ static uint16 fw_upload_WaitFor_ErrCode()
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSend, uint32 ulOffset)
 
 {
   // Retransmittion of previous block
   if (ulOffset == ulLastOffsetToSend)
   {
-#ifdef DEBUG_PRINT
-    PRINT("\nRetx offset %d...\n", ulOffset);
-#endif
+    VND_LOGV("Retx offset %d...", ulOffset);
     fw_upload_ComWriteChars(mchar_fd, (uint8 *)ucByteBuffer, uiLenToSend);
   }
-  else
+  else  
   {
     //uint16 uiNumRead = 0;
     // The length requested by the Helper is equal to the Block
@@ -720,7 +665,7 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
     // block sizes are 128, 256, 512.
     // uiLenToSend % 16 == 0. This means the previous packet
     // was error free (CRC ok) or this is the first packet received.
-    //  We can clear the ucByteBuffer and populate fresh data.
+    //  We can clear the ucByteBuffer and populate fresh data. 
     memset (ucByteBuffer, 0, sizeof(ucByteBuffer));
     memcpy(ucByteBuffer,pFileBuffer+ulOffset,uiLenToSend);
     ulCurrFileSize += uiLenToSend;
@@ -734,7 +679,7 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
  * Name: fw_upload_SendIntBytes
  *
  * Description:
- *   This function sends 4 bytes and 4bytes' compare.
+ *   This function sends 4 bytes and 4bytes' compare.    
  *
  * Conditions For Use:
  *   None.
@@ -748,12 +693,12 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer, uint16 uiLenToSen
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static void fw_upload_SendIntBytes(uint32 ulBytesToSent)
 {
   uint8 i, uTemp[9], uiLocalCnt = 0;
   uint32 ulBytesToSentCmp;
-
+  
   ulBytesToSentCmp = ulBytesToSent ^ 0xFFFFFFFF;
 
   for (i = 0; i < 4; i ++)
@@ -773,7 +718,7 @@ static void fw_upload_SendIntBytes(uint32 ulBytesToSent)
  * Name: fw_upload_SendLenBytes
  *
  * Description:
- *   This function sends Len bytes(header+data) to the boot code.
+ *   This function sends Len bytes(header+data) to the boot code.    
  *
  * Conditions For Use:
  *   None.
@@ -788,27 +733,22 @@ static void fw_upload_SendIntBytes(uint32 ulBytesToSent)
  * Notes:
  *   None.
  *
- *****************************************************************************/
+ *****************************************************************************/ 
 static uint16 fw_upload_SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend)
 {
   uint16 ucDataLen, uiLen;
   //uint16 uiNumRead = 0;
-#ifdef DEBUG_PRINT
-  uint16 i;
-#endif
   memset (ucByteBuffer, 0, sizeof(ucByteBuffer));
   if(!ucCmd5Sent)
   {
     // put header and data into temp buffer first
-    memcpy(ucByteBuffer, ucCmd5Patch, uiLenToSend);
+    memcpy(ucByteBuffer, ucCmd5Patch, uiLenToSend); 
     //get data length from header
     ucDataLen = fw_upload_GetDataLen(ucByteBuffer);
     memcpy(&ucByteBuffer[uiLenToSend], &ucCmd5Patch[uiLenToSend], ucDataLen);
     uiLen = fw_upload_SendBuffer(uiLenToSend, ucByteBuffer);
     ucCmd5Sent = 1;
-#ifdef DEBUG_PRINT
-    PRINT("\ncmd5 patch is sent\n");
-#endif
+    VND_LOGV("cmd5 patch is sent");
   }
   else
   {
@@ -819,19 +759,19 @@ static uint16 fw_upload_SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend)
     memcpy(&ucByteBuffer[uiLenToSend],pFileBuffer+ulCurrFileSize,ucDataLen);
     ulCurrFileSize += ucDataLen;
 #ifdef DEBUG_PRINT
-    PRINT("The buffer is to be sent: %d", uiLenToSend + ucDataLen);
-    for(i = 0; i < (uiLenToSend + ucDataLen); i ++)
+    VND_LOGV("The buffer is to be sent: %d", uiLenToSend + ucDataLen);
+    for(uint i = 0; i < (uiLenToSend + ucDataLen); i ++)
     {
       if(i % 16 == 0)
       {
-        PRINT("\n");
+        VND_LOGV("\n");
       }
-      PRINT(" %02x ", ucByteBuffer[i]);
+      VND_LOGV("%02x", ucByteBuffer[i]);
     }
 #endif
     //start to send Temp buffer
     uiLen = fw_upload_SendBuffer(uiLenToSend, ucByteBuffer);
-    PRINT("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
+    VND_LOGV("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
   }
   return uiLen;
 }
@@ -875,7 +815,7 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
   pFile = fopen(pFileName, "rb");
 
   if ((mchar_fd < 0) || (pFile == NULL)) {
-    printf("\nPort is not open or file not found\n");
+    VND_LOGE("Port is not open or file not found");
     return bRetVal;
   }
 
@@ -883,14 +823,14 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
   result = fseek(pFile, 0, SEEK_END);
   if (result)
   {
-    printf("\nfseek failed\n");
+    VND_LOGE("fseek failed");
     return bRetVal;
   }
 
   ulTotalFileSize = (uint32)ftell(pFile);
   if (!ulTotalFileSize)
   {
-    printf("\nError:Download Size is 0\n");
+    VND_LOGE("Error:Download Size is 0");
     return bRetVal;
   }
 
@@ -902,7 +842,7 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
     ulReadLen = fread(pFileBuffer, 1, ulTotalFileSize, pFile);
     if (ulReadLen != ulTotalFileSize)
     {
-      PRINT("\nError:Read File Fail\n");
+      VND_LOGV("Error:Read File Fail");
       return bRetVal;
     }
 
@@ -917,13 +857,13 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
     // Wait to Receive 0xa5, 0xaa, 0xa6
     if (!fw_upload_WaitForHeaderSignature(TIMEOUT_VAL_MILLISEC))
     {
-      PRINT("\n0xa5,0xaa,or 0xa6 is not received in 4s.\n");
+      VND_LOGV("0xa5,0xaa,or 0xa6 is not received in 4s.");
       return bRetVal;
     }
 
     // Read the 'Length' bytes requested by Helper
     uiLenToSend = fw_upload_WaitFor_Len(pFile);
-
+  
     if(ucRcvdHeader == HELPER_HEADER)
     {
       ucHelperOn = TRUE;
@@ -934,9 +874,7 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
         if(uiLenToSend != 0)
         {
           fw_upload_SendLenBytesToHelper(pFileBuffer, uiLenToSend, ulOffsettoSend);
-#ifdef DEBUG_PRINT
-          PRINT("\n sent %d bytes..\n", ulOffsettoSend);
-#endif
+          VND_LOGV("sent %d bytes..", ulOffsettoSend);
         }
         else    //download complete
         {
@@ -951,27 +889,23 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
       }
       else if (uiErrCode > 0)
       {
-      /*delay 20ms to make multiple uiErrCode == 1 has been sent, after 20ms, if get
+      /*delay 20ms to make multiple uiErrCode == 1 has been sent, after 20ms, if get 
        *uiErrCode = 1 again, we consider 0x6b is missing.
        */
         fw_upload_DelayInMs(20);
         tcflush(mchar_fd, TCIFLUSH);
         fw_upload_SendIntBytes(ulOffsettoSend);
       }
-      PRINT("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
+      VND_LOGV("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
 
       // Ensure any pending write data is completely written
       if (0 == tcdrain(mchar_fd))
       {
-#ifdef DEBUG_PRINT
-        PRINT("\n\t tcdrain succeeded\n");
-#endif
+        VND_LOGV("\t tcdrain succeeded");
       }
       else
       {
-#ifdef DEBUG_PRINT
-        PRINT("\n\t FW download tcdrain failed with errno = %d\n", errno);
-#endif
+        VND_LOGV("\t FW download tcdrain failed with errno = %d", errno);
       }
     }
 
@@ -983,12 +917,12 @@ static BOOLEAN fw_upload_FW(int8 *pFileName) {
       }while(uiLenToSend != 0);
   	  // If the Length requested is 0, download is complete.
       if (uiLenToSend == 0)
-      {
+      {	  
         bRetVal = TRUE;
         break;
       }
     }
-
+    
   }
   if(pFileBuffer != NULL)
   {
@@ -1025,14 +959,14 @@ BOOLEAN bt_vnd_mrvl_check_fw_status_v2() {
   BOOLEAN bRetVal = FALSE;
 
   if (mchar_fd < 0) {
-    printf("\nPort is not open or file not found\n");
+    VND_LOGE("Port is not open or file not found");
     return bRetVal;
   }
 
   // Wait to Receive 0xa5, 0xaa, 0xa6
   bRetVal = fw_upload_WaitForHeaderSignature(200);
 
-  printf("fw_upload_WaitForHeaderSignature return %d", bRetVal);
+  VND_LOGD("fw_upload_WaitForHeaderSignature return %d", bRetVal);
 
   return bRetVal;
 }
@@ -1071,20 +1005,20 @@ int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName
 
   start = fw_upload_GetTime();
 
-  printf("Protocol: NXP Proprietary\n");
-  printf("FW Loader Version: %s\n", VERSION);
-  printf("ComPort : %s\n", pPortName);
-  printf("BaudRate: %d\n", iBaudrate);
-  printf("Filename: %s\n", pFileName);
+  VND_LOGI("Protocol: NXP Proprietary");
+  VND_LOGI("FW Loader Version: %s", VERSION);
+  VND_LOGD("ComPort : %s", pPortName);
+  VND_LOGD("BaudRate: %d", iBaudrate);
+  VND_LOGD("Filename: %s", pFileName);
 
   do
   {
     ulResult = fw_upload_FW(pFileName);
     if(ulResult)
     {
-      printf("\nDownload Complete\n");
+      VND_LOGI("Download Complete");
       cost = fw_upload_GetTime() - start;
-      printf("time:%llu\n", cost);
+      VND_LOGI("time:%llu", cost);
       if(ucHelperOn == TRUE)
       {
         endTime = fw_upload_GetTime() + POLL_AA_TIMEOUT;
@@ -1096,7 +1030,7 @@ int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName
             fw_upload_ComReadChars(mchar_fd, (uint8 *)&ucByte,1);
             if (ucByte == VERSION_HEADER)
             {
-              PRINT("\nReDownload\n");
+              VND_LOGV("ReDownload");
               uiReDownload = TRUE;
               ulLastOffsetToSend = 0xFFFF;
               memset (ucByteBuffer, 0, sizeof(ucByteBuffer));
@@ -1112,7 +1046,7 @@ int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName
         {
           if (!fw_upload_ComGetCTS(mchar_fd))
           {
-            PRINT("CTS is low\n");
+            VND_LOGV("CTS is low");
             if(pFile)
             {
               fclose(pFile);
@@ -1121,8 +1055,8 @@ int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName
             goto done;
           }
         } while (endTime > fw_upload_GetTime());
-        PRINT("wait CTS low timeout \n");
-        PRINT("Error code is %d\n",ulResult);
+        VND_LOGV("wait CTS low timeout");
+        VND_LOGV("Error code is %d",ulResult);
         if(pFile)
         {
           fclose(pFile);
@@ -1133,7 +1067,7 @@ int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudrate, int8 *pFileName
     }
     else
     {
-      printf("\nDownload Error\n");
+      VND_LOGE("Download Error");
       return 1;
     }
   } while(uiReDownload);

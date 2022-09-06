@@ -19,7 +19,6 @@
 #define LOG_TAG "hardware_nxp"
 
 #include <assert.h>
-#include <log/log.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +27,7 @@
 #include "bt_hci_bdroid.h"
 #include "bt_vendor_nxp.h"
 #include "fw_loader_io.h"
-
+#include "bt_vendor_log.h"
 /******************************************************************************
 **  Constants & Macros
 ******************************************************************************/
@@ -203,6 +202,7 @@ static uint8_t wake_gpio_config = 0;
 /***********************************************************
 **  HELPER FUNCTIONS
 ***********************************************************/
+#if (BT_TRACE_LEVEL_DEBUG <= VHAL_LOG_LEVEL)
 static char* cmd_to_str(uint16_t cmd) {
   switch (cmd) {
     case HCI_CMD_NXP_WRITE_PCM_SETTINGS:
@@ -239,6 +239,7 @@ static char* cmd_to_str(uint16_t cmd) {
 
   return "unknown command";
 }
+#endif
 /******************************************************************************
  **
  ** Function:      hw_bt_send_packet
@@ -252,11 +253,11 @@ int8 hw_bt_send_packet(HC_BT_HDR* packet, uint16_t opcode,hw_config_reply_handle
   int8 ret = -1;
   if (packet) {
     if (vnd_cb->xmit_cb(opcode, packet, reply_handler)) {
-      ALOGI("Sending hci command 0x%04hX (%s)", opcode, cmd_to_str(opcode));
+      VND_LOGD("Sending hci command 0x%04hX (%s)", opcode, cmd_to_str(opcode));
       ret = 0;
     }
   } else {
-    VNDDBG("%s Error:Sending Invalid Packet \n", __func__);
+    VND_LOGE("%s Error:Sending Invalid Packet", __func__);
   }
   return ret;
 }
@@ -358,27 +359,27 @@ static void hw_sco_config_cb(void* p_mem) {
       break;
     case HCI_CMD_NXP_WRITE_VOICE_SETTINGS:
       /* sco config succeeds */
-      ALOGI("SCO PCM config succeeds!");
+      VND_LOGD("SCO PCM config succeeds!");
       vnd_cb->scocfg_cb(BT_VND_OP_RESULT_SUCCESS);
       hw_config_next();
       return;
 
     default:
-      ALOGE("Received event for unexpected cmd (0x%04hX). Fail.",
-            evt_params.cmd);
+      VND_LOGE("Received event for unexpected cmd (0x%04hX). Fail.",
+               evt_params.cmd);
       p_buf = NULL;
       break;
   } /* switch (evt_params.cmd) */
 
   if (p_buf) {
-    ALOGI("Sending hci command 0x%04hX (%s)", cmd, cmd_to_str(cmd));
+    VND_LOGD("Sending hci command 0x%04hX (%s)", cmd, cmd_to_str(cmd));
     if (vnd_cb->xmit_cb(cmd, p_buf, hw_sco_config_cb))
       return;
     else
       vnd_cb->dealloc(p_buf);
   }
 
-  ALOGE("Vendor lib scocfg aborted");
+  VND_LOGE("Vendor lib scocfg aborted");
   vnd_cb->scocfg_cb(BT_VND_OP_RESULT_FAIL);
   hw_config_next();
 }
@@ -405,13 +406,13 @@ static int8 hw_sco_config(void) {
     p_buf = build_cmd_buf(cmd, WRITE_PCM_SETTINGS_SIZE, write_pcm_settings);
 
     if (p_buf) {
-      ALOGI("Sending hci command 0x%04hX (%s)", cmd, cmd_to_str(cmd));
+      VND_LOGD("Sending hci command 0x%04hX (%s)", cmd, cmd_to_str(cmd));
       if (vnd_cb->xmit_cb(cmd, p_buf, hw_sco_config_cb))
         return 0;
       else
         vnd_cb->dealloc(p_buf);
     }
-    ALOGE("Vendor lib scocfg aborted");
+    VND_LOGE("Vendor lib scocfg aborted");
     vnd_cb->scocfg_cb(BT_VND_OP_RESULT_FAIL);
   }
   return ret;
@@ -431,7 +432,7 @@ static HC_BT_HDR* make_command(uint16_t opcode, size_t parameter_size) {
   HC_BT_HDR* packet = (HC_BT_HDR*)malloc(
       sizeof(HC_BT_HDR) + HCI_COMMAND_PREAMBLE_SIZE + parameter_size);
   if (!packet) {
-    ALOGE("%s Failed to allocate buffer\n", __func__);
+    VND_LOGE("%s Failed to allocate buffer", __func__);
     return NULL;
   }
   uint8_t* stream = packet->data;
@@ -462,15 +463,15 @@ static void hw_config_process_packet(void* packet) {
   event = ((HC_BT_HDR*)packet)->event;
   len = ((HC_BT_HDR*)packet)->len;
   opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1; /*Skip num packets.*/
-  VNDDBG("Packet length %d", len);
+  VND_LOGD("Packet length %d", len);
   /*Minimum length of commad event should be 6 bytes*/
   if ((event == HCI_PACKET_TYPE_EVENT) && (len >= 6)) {
     event_code = stream[0];
     opcode = stream[opcode_offset] | (stream[opcode_offset + 1] << 8);
     if (event_code == HCI_COMMAND_COMPLETE_EVT) {
       status = stream[opcode_offset + 2];
-      ALOGI("Reply received for command 0x%04hX (%s) status 0x%02x", opcode,
-            cmd_to_str(opcode), status);
+      VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x", opcode,
+               cmd_to_str(opcode), status);
       switch (opcode) {
         case HCI_CMD_NXP_CUSTOM_OPCODE:
           if ((stream[opcode_offset + 3] == HCI_CMD_NXP_SUB_ID_BLE_TX_POWER) &&
@@ -479,28 +480,28 @@ static void hw_config_process_packet(void* packet) {
           }
           break;
         case HCI_CMD_NXP_READ_FW_REVISION: {
-          VNDDBG("%s Read FW version reply recieved", __func__);
+          VND_LOGD("%s Read FW version reply recieved", __func__);
           if ((status == 0) && (len >= 14)) {
             if (len >= 15) {
-              ALOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
-                    stream[6], stream[9], stream[14]);
+              VND_LOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
+                       stream[6], stream[9], stream[14]);
             } else {
-              ALOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7], stream[6],
-                    stream[9]);
+              VND_LOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7],
+                       stream[6], stream[9]);
             }
-            ALOGI("ROM version: %02X %02X %02X %02X", stream[10], stream[11],
-                  stream[12], stream[13]);
+            VND_LOGI("ROM version: %02X %02X %02X %02X", stream[10], stream[11],
+                     stream[12], stream[13]);
           } else {
-            ALOGI("%s Error while reading FW version", __func__);
+            VND_LOGE("%s Error while reading FW version", __func__);
           }
           break;
         }
         case HCI_READ_LOCAL_BDADDR: {
           p_tmp = (char*)(p_evt_buf + 1) + HCI_EVT_CMD_CMPL_LOCAL_BDADDR_ARRAY;
           if (!IS_DEFAULT_BDADDR(p_tmp)) {
-            VNDDBG("Controller OTP bdaddr %02X:%02X:%02X:%02X:%02X:%02X",
-                   *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
-                   *(p_tmp + 1), *p_tmp);
+            VND_LOGI("Controller OTP bdaddr %02X:%02X:%02X:%02X:%02X:%02X",
+                     *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
+                     *(p_tmp + 1), *p_tmp);
             ++hw_config.indx; /*Skip writting bd address*/
           }
           break;
@@ -520,7 +521,8 @@ static void hw_config_process_packet(void* packet) {
       }
     }
   } else {
-    ALOGE("Unexpected packet received. Event type:%02x Len:%02x", event, len);
+    VND_LOGE("Unexpected packet received. Event type:%02x Len:%02x", event,
+             len);
   }
 }
 
@@ -535,26 +537,26 @@ static void hw_config_process_packet(void* packet) {
 *******************************************************************************/
 static void hw_config_seq(void* packet) {
   (packet == NULL) ?: hw_config_process_packet(packet);
-  VNDDBG("skip=%d ", hw_config.skip_seq_incr);
+  VND_LOGD("skip=%d ", hw_config.skip_seq_incr);
   if (hw_config.skip_seq_incr) {
     hw_config.skip_seq_incr = 0;
   } else {
     ++hw_config.indx;
   }
-  VNDDBG("seq_indx=%d/%d", hw_config.indx, hw_config.size);
+  VND_LOGD("seq_indx=%d/%d", hw_config.indx, hw_config.size);
   if (hw_config.indx < hw_config.size) {
     if (hw_config_seq_arr[hw_config.indx]() != 0) {
       hw_config_next();
     }
   } else if(hw_config.indx == hw_config.size){
-    VNDDBG("FW config completed!");
+    VND_LOGI("FW config completed!");
     if (vnd_cb) {
       vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
       if (enable_heartbeat_config == TRUE) {
         pthread_create(&p_headtbeat, NULL, send_heartbeat_thread, NULL);
       }
     } else {
-      VNDDBG("Invalid HW config sequence");
+      VND_LOGE("Invalid HW config sequence");
     }
   }
 }
@@ -577,10 +579,10 @@ static int8 bt_bdaddress_set(void) {
   packet = make_command(opcode, WRITE_BD_ADDRESS_SIZE);
   if (packet) {
     memcpy(&packet->data[3], write_bd_address, WRITE_BD_ADDRESS_SIZE);
-    VNDDBG("bdaddr is %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX\n",
-           write_bd_address[7], write_bd_address[6], write_bd_address[5],
-           write_bd_address[4], write_bd_address[3], write_bd_address[2]);
-    ret = hw_bt_send_packet(packet, opcode,hw_config_seq);
+    VND_LOGD("bdaddr is %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
+             write_bd_address[7], write_bd_address[6], write_bd_address[5],
+             write_bd_address[4], write_bd_address[3], write_bd_address[2]);
+    ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
   }
   return ret;
 }
@@ -687,12 +689,12 @@ static int hw_bt_load_cal_file(const char* cal_file_name, uint8_t* cal_data,
   int data_len = 0;
   int ret = -1;
   if (fp == NULL) {
-    VNDDBG("Can't open calibration file: %s ", cal_file_name);
+    VND_LOGD("Can't open calibration file: %s ", cal_file_name);
     return ret;
   }
   while ((fscanf(fp, " %2x", &data) == 1)) {
     if (data_len >= (*cal_data_size)) {
-      VNDDBG("%s cal_file size too big \n", __func__);
+      VND_LOGE("%s cal_file size too big", __func__);
       goto done;
     }
     cal_data[data_len++] = (unsigned char)data;
@@ -724,10 +726,10 @@ static int8 hw_bt_cal_data_load(void) {
   int i;
   int8 ret = -1;
   uint32_t cal_data_size = sizeof(cal_data);
-  VNDDBG("Loading calibration Data");
+  VND_LOGD("Loading calibration Data");
   memset(cal_data, 0, cal_data_size);
   if (hw_bt_load_cal_file(pFilename_cal_data, cal_data, &cal_data_size)) {
-    VNDDBG("%s Error while processing calibration file \n", __func__);
+    VND_LOGD("%s Error while processing calibration file", __func__);
     goto done;
   }
   opcode = HCI_CMD_NXP_LOAD_CONFIG_DATA;
@@ -785,11 +787,11 @@ static int8 hw_ble_send_power_level_cmd(uint8_t phy_level, int8_t power_level) {
 static int8 hw_ble_set_power_level(void) {
   int8 ret = -1;
   if (set_1m_2m_power & BLE_SET_1M_POWER) {
-    ALOGI("Setting BLE 1M TX power level at %d dbm", ble_1m_power);
+    VND_LOGD("Setting BLE 1M TX power level at %d dbm", ble_1m_power);
     set_1m_2m_power &= ~BLE_SET_1M_POWER;
     ret = hw_ble_send_power_level_cmd(1, ble_1m_power);
   } else if (set_1m_2m_power & BLE_SET_2M_POWER) {
-    ALOGI("Setting BLE 2M TX power level at %d dbm", ble_2m_power);
+    VND_LOGD("Setting BLE 2M TX power level at %d dbm", ble_2m_power);
     set_1m_2m_power &= ~BLE_SET_2M_POWER;
     ret = hw_ble_send_power_level_cmd(2, ble_2m_power);
   }
@@ -864,7 +866,7 @@ static int8 hw_bt_enable_independent_reset(void) {
 *******************************************************************************/
 static void kill_thread_signal_handler(int sig) {
   (void)sig;
-  ALOGI("send_heartbeat_thread killed\n");
+  VND_LOGD("send_heartbeat_thread killed");
   pthread_exit(0);
 }
 
@@ -883,7 +885,7 @@ static void* send_heartbeat_thread(void* data) {
   (void)data;
   
   send_heartbeat = TRUE;
-  ALOGI("Starting Heartbeat Thread");
+  VND_LOGD("Starting Heartbeat Thread");
   signal(SIGUSR1, kill_thread_signal_handler);
   while (send_heartbeat) {
     fw_upload_DelayInMs(wakup_local_param_config.heartbeat_timer_value * 100);
@@ -925,11 +927,11 @@ static int8 set_wakeup_gpio_config(void) {
       packet->data[5] = wakeup_gpio_config[wake_gpio_config].gpio_pin;
       packet->data[6] = wakeup_gpio_config[wake_gpio_config].high_duration;
       packet->data[7] = wakeup_gpio_config[wake_gpio_config].low_duration;
-      ALOGI("wakeup %s send out command successfully, %d, %d, %d, %d,\n",
-             __func__, wake_gpio_config,
-             wakeup_gpio_config[wake_gpio_config].gpio_pin,
-             wakeup_gpio_config[wake_gpio_config].high_duration,
-             wakeup_gpio_config[wake_gpio_config].low_duration);
+      VND_LOGD("wakeup %s send out command successfully, %d, %d, %d, %d",
+               __func__, wake_gpio_config,
+               wakeup_gpio_config[wake_gpio_config].gpio_pin,
+               wakeup_gpio_config[wake_gpio_config].high_duration,
+               wakeup_gpio_config[wake_gpio_config].low_duration);
       wakeup_gpio_config_state = wake_gpio_config;
       ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
       wake_gpio_config++;
@@ -961,15 +963,15 @@ static int8  set_wakeup_adv_pattern(void) {
       packet->data[4] = wakeup_adv_config.length;
       memcpy(&packet->data[5], &wakeup_adv_config.adv_pattern[0],
              wakeup_adv_config.length);
-      ALOGI(
+      VND_LOGD(
           "wakeup %s send out command successfully local, %d, %d, %d, %d, %d, "
-          "%d\n",
+          "%d",
           __func__, wakeup_adv_config.length, wakeup_adv_config.adv_pattern[0],
           wakeup_adv_config.adv_pattern[1], wakeup_adv_config.adv_pattern[4],
           wakeup_adv_config.adv_pattern[7], wakeup_adv_config.adv_pattern[8]);
-      ALOGI(
+      VND_LOGD(
           "wakeup %s send out command successfully hci, %d, %d, %d, %d, %d, "
-          "%d\n",
+          "%d",
           __func__, packet->data[4], packet->data[5], packet->data[6],
           packet->data[10], packet->data[12], packet->data[13]);
       ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
@@ -1003,12 +1005,12 @@ static int8 set_wakeup_scan_parameter(void) {
       packet->data[8] = (unsigned char)(wakeup_scan_param_config.window >> 8);
       packet->data[9] = wakeup_scan_param_config.own_addr_type;
       packet->data[10] = wakeup_scan_param_config.scan_filter_policy;
-      ALOGI("wakeup %s send out paramter, %d, %d, %d, %d, %d\n", __func__,
-             wakeup_scan_param_config.le_scan_type,
-             (packet->data[5] | (packet->data[6] << 8)),
-             (packet->data[7] | (packet->data[8] << 8)),
-             wakeup_scan_param_config.own_addr_type,
-             wakeup_scan_param_config.scan_filter_policy);
+      VND_LOGD("wakeup %s send out paramter, %d, %d, %d, %d, %d", __func__,
+               wakeup_scan_param_config.le_scan_type,
+               (packet->data[5] | (packet->data[6] << 8)),
+               (packet->data[7] | (packet->data[8] << 8)),
+               wakeup_scan_param_config.own_addr_type,
+               wakeup_scan_param_config.scan_filter_policy);
       ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
     }
   }
@@ -1077,13 +1079,13 @@ static void wakeup_event_handler(uint8_t sub_ocf) {
  *****************************************************************************/
 void wakeup_kill_heartbeat_thread(void) {
   int status = -1;
-  VNDDBG("Killing heartbeat thread");
+  VND_LOGD("Killing heartbeat thread");
   if (send_heartbeat) {
     send_heartbeat = FALSE;
     status = pthread_kill(p_headtbeat, SIGUSR1);
     fw_upload_DelayInMs(10);
   }
-  VNDDBG("Killed heartbeat with status %d", status);
+  VND_LOGD("Killed heartbeat with status %d", status);
 }
 
 /******************************************************************************

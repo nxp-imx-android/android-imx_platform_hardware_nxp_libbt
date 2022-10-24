@@ -65,8 +65,9 @@
  */
 #define POLL_DRIVER_DURATION_US (100000)
 #define POLL_DRIVER_MAX_TIME_MS (20000)
-#define POLL_CONFIG_UART_MS (50)
+#define POLL_CONFIG_UART_MS (10)
 #define POLL_INBAND_COMMAND_MS (1)
+#define POLL_MAX_TIMOUT_MS (1000)
 
 #define CONF_COMMENT '#'
 #define CONF_DELIMITERS " =\n\r\t"
@@ -632,28 +633,29 @@ static void vnd_load_conf(const char* p_path) {
  *****************************************************************************/
 
 static int read_hci_event(int fd, unsigned char* buf, int size,
-                          int retry_delay_ms) {
+                          int retry_delay_ms, int max_duration) {
   int remain, r;
   int count = 0;
-  int k = 0;
+  int total_duration = 0;
 
   if (size <= 0) return -1;
 
   /* The first byte identifies the packet type. For HCI event packets, it
    * should be 0x04, so we read until we get to the 0x04. */
   VND_LOGD("start read hci event 0x4");
-  while (k < 20) {
+  while (total_duration < max_duration) {
     r = read(fd, buf, 1);
     if (r <= 0) {
-      VND_LOGD("read hci event 0x04 failed, retry");
-      k++;
+      VND_LOGV("read hci event 0x04 failed, retry");
       usleep(retry_delay_ms * 1000);
+      total_duration += retry_delay_ms;
       continue;
     }
     if (buf[0] == 0x04) break;
   }
-  if (k >= 20) {
-    VND_LOGE("read hci event 0x04 failed, return error. k = %d", k);
+  if (total_duration >= max_duration) {
+    VND_LOGE("read hci event 0x04 failed, return error. total_duration = %d",
+             total_duration);
     return -1;
   }
   count++;
@@ -1054,8 +1056,8 @@ static int config_uart() {
       return -1;
     }
 
-    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS)) <
-            0 ||
+    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS,
+                                    POLL_MAX_TIMOUT_MS)) < 0 ||
         memcmp(resp, resp_cmp_reset, 7)) {
       VND_LOGE("Failed to read HCI RESET CMD response!");
       return -1;
@@ -1078,18 +1080,17 @@ static int config_uart() {
         return -1;
       }
     }
-    usleep(60000); /* Sleep to allow baud rate setting to happen in FW */
 
     VND_LOGD("start read hci event");
     memset(resp, 0x00, 10);
-    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS)) <
-            0 ||
+    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS,
+                                    POLL_MAX_TIMOUT_MS)) < 0 ||
         memcmp(resp, resp_cmp, 7)) {
       VND_LOGE("Failed to read set baud rate command response! ");
       return -1;
     }
     VND_LOGD("over send bt chip baudrate");
-
+    usleep(60000); /* Sleep to allow baud rate setting to happen in FW */
     /* set host uart speed according to baudrate_bt */
     VND_LOGD("start set host baud rate as baudrate_bt");
     tcflush(mchar_fd, TCIOFLUSH);
@@ -1116,7 +1117,6 @@ static int config_uart() {
   }
 
   usleep(20 * 1000);
-  set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
   return 0;
 }
 static bool bt_vnd_is_rfkill_disabled(void) {
@@ -1278,15 +1278,17 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
   unsigned char inband_reset_resp[] = {0x04, 0x0E, 0x04, 0x01,
                                        0xFC, 0xFC, 0x00};
   unsigned char hci_resp[sizeof(inband_reset_resp)];
+  int32_t _last_baudrate = last_baudrate;
+
   if (get_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED) == 1) {
-    if (last_baudrate != baudrate) {
-      if (uart_set_speed(mchar_fd, &ti, last_baudrate) < 0) {
-        VND_LOGE("Can't set last baud rate %d", last_baudrate);
-        close(mchar_fd);
-        return -1;
-      } else {
-        VND_LOGD("Baud rate changed from %d to %d", baudrate, last_baudrate);
-      }
+    close(mchar_fd);
+    mchar_fd = uart_init_open(mchar_port, _last_baudrate, 1);
+    if (mchar_fd <= 0) {
+      VND_LOGE("Can't set last baud rate %d", _last_baudrate);
+      return -1;
+    } else {
+      VND_LOGD("Baud rate changed from %d to %d with flow control enabled",
+               baudrate, _last_baudrate);
     }
     cmd_resp_len = sizeof(inband_reset_cmd);
     tcflush(mchar_fd, TCIOFLUSH);
@@ -1298,21 +1300,22 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
       cmd_resp_len = sizeof(inband_reset_resp);
       memset(hci_resp, 0x00, cmd_resp_len);
       if ((cmd_resp_len != read_hci_event(mchar_fd, hci_resp, cmd_resp_len,
-                                          POLL_INBAND_COMMAND_MS)) ||
+                                          POLL_INBAND_COMMAND_MS,
+                                          POLL_MAX_TIMOUT_MS)) ||
           memcmp(hci_resp, inband_reset_resp, cmd_resp_len) != 0) {
         VND_LOGE("Failed to read Inband reset response");
         return -1;
       }
       VND_LOGD("=========Inband IR trigger sent succesfully=======");
     }
-    if (last_baudrate != baudrate) {
-      if (uart_set_speed(mchar_fd, &ti, baudrate) < 0) {
-        VND_LOGE("Can't set last baud rate %d", baudrate);
-        close(mchar_fd);
-        return -1;
-      } else {
-        VND_LOGD("Baud rate changed from %d to %d", last_baudrate, baudrate);
-      }
+    close(mchar_fd);
+    mchar_fd = uart_init_open(mchar_port, baudrate, 0);
+    if (mchar_fd <= 0) {
+      VND_LOGE("Can't set last baud rate %d", _last_baudrate);
+      return -1;
+    } else {
+      VND_LOGD("Baud rate changed from %d to %d with flow control disabled",
+               _last_baudrate, baudrate);
     }
   }
   return 0;
@@ -1467,7 +1470,8 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         }
         bluetooth_opened = get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED);
 #ifdef UART_DOWNLOAD_FW
-        if (enable_download_fw && !get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED)) {
+        if (enable_download_fw &&
+            !get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED)) {
           if (detect_and_download_fw()) {
             VND_LOGE("detect_and_download_fw failed");
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);

@@ -24,13 +24,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bt_hci_bdroid.h"
 #include "bt_vendor_nxp.h"
 #include "fw_loader_io.h"
 #include "bt_vendor_log.h"
 /******************************************************************************
 **  Constants & Macros
 ******************************************************************************/
+/*****************************************************************************
+ * ** copy from bt_hci_bdroid.h
+ * ******************************************************************************/
+#define MSG_STACK_TO_HC_HCI_CMD 0x2000 /* eq. BT_EVT_TO_LM_HCI_CMD */
+#define BT_HC_HDR_SIZE (sizeof(HC_BT_HDR))
 
 #define HCI_CMD_NXP_WRITE_VOICE_SETTINGS 0x0C26
 #define HCI_CMD_NXP_WRITE_PCM_SETTINGS 0xFC07
@@ -473,6 +477,10 @@ static void hw_config_process_packet(void* packet) {
       VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x", opcode,
                cmd_to_str(opcode), status);
       switch (opcode) {
+        case HCI_CMD_NXP_RESET:
+          if (status == 0) {
+            set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
+          }
         case HCI_CMD_NXP_CUSTOM_OPCODE:
           if ((stream[opcode_offset + 3] == HCI_CMD_NXP_SUB_ID_BLE_TX_POWER) &&
               set_1m_2m_power) {

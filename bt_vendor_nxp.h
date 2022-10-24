@@ -28,6 +28,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "bt_vendor_lib.h"
+#include <stdbool.h>
 
 /******************************************************************************
 **  Local type definitions
@@ -45,7 +46,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "009.008"
+#define BT_HAL_VERSION "009.010"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)

@@ -36,8 +36,8 @@ endif
 endif
 
 LOCAL_C_INCLUDES += \
-    $(BDROID_DIR)/hci/include \
-    $(LOCAL_PATH)/conf/nxp/
+    $(LOCAL_PATH)/conf/nxp/ \
+    $(TOP_DIR)hardware/interfaces/bluetooth/1.0/default
 
 LOCAL_SRC_FILES := \
     bt_vendor_nxp.c \

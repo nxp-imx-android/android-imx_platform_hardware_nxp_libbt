@@ -46,7 +46,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "009.010"
+#define BT_HAL_VERSION "009.012"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -79,6 +79,8 @@ typedef unsigned char BOOLEAN;
 
 #define PROP_BLUETOOTH_FW_DOWNLOADED "bluetooth.nxp.fw_downloaded"
 #define PROP_BLUETOOTH_INBAND_CONFIGURED "bluetooth.nxp.inband_ir_configured"
+#define PROP_BLUETOOTH_BOOT_SLEEP_TRIGGER \
+  "bluetooth.nxp.sent_boot_sleep_triggered"
 /* Run-time configuration file */
 #ifndef VENDOR_LIB_CONF_FILE
 #define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"

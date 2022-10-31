@@ -1,6 +1,18 @@
 # Change Log
 All notable changes in Bluetooth Vendor Hardware Abstraction Layer(BT VHAL) will be documented in this file.
 
+## [009.012]
+- Updated Makefile to fix BT VHAL compilation error for Android-13 codebase
+
+## [009.011]
+- Added boot sleep patch support for android auto
+ 
+## [009.010] - 2022-Aug-26
+- Fixed Inband Independent Reset Trigger for Android Automotive
+
+## [009.009] - 2022-Aug-18
+- Record firmware is downloaded and running after appropriate activity
+
 ## [009.008] - 2022-July-15
 
 ### Added

@@ -131,6 +131,7 @@ static char pFileName_image[MAX_PATH_LEN] =
     "/vendor/firmware/uart8997_bt_v4.bin";
 static int32_t iSecondBaudrate = 0;
 uint8_t enable_poke_controller = 0;
+static bool send_boot_sleep_trigger = FALSE;
 #endif
 char pFilename_cal_data[MAX_PATH_LEN];
 static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -371,6 +372,14 @@ static int set_enable_poke_controller(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
   enable_poke_controller = atoi(p_conf_value);
+  return 0;
+}
+
+static int set_send_boot_sleep_trigger(char* p_conf_name, char* p_conf_value,
+                                       int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  send_boot_sleep_trigger = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
   return 0;
 }
 #endif
@@ -956,7 +965,7 @@ static int uart_init_open(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
 *******************************************************************************/
 
 static int detect_and_download_fw() {
-  int download_ret = 0;
+  int download_ret = 1;
 #ifndef FW_LOADER_V2
   init_crc8();
 #endif
@@ -965,6 +974,13 @@ static int detect_and_download_fw() {
   if (bt_vnd_mrvl_check_fw_status_v2()) {
 #else
   if (bt_vnd_mrvl_check_fw_status()) {
+#endif
+#ifdef UART_DOWNLOAD_FW
+    if ((send_boot_sleep_trigger == TRUE) &&
+        (!get_prop_int32(PROP_BLUETOOTH_BOOT_SLEEP_TRIGGER))) {
+      VND_LOGD("setting PROP_BLUETOOTH_BOOT_SLEEP_TRIGGER to 1");
+      set_prop_int32(PROP_BLUETOOTH_BOOT_SLEEP_TRIGGER, 1);
+    }
 #endif
     if (download_helper) {
 #ifdef FW_LOADER_V2
@@ -1424,6 +1440,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VND_LOGD("enable_download_fw %d", enable_download_fw);
           VND_LOGD("uart_sleep_after_dl %d", uart_sleep_after_dl);
           VND_LOGD("independent_reset_mode %d", independent_reset_mode);
+          VND_LOGD("send_boot_sleep_trigger %d", send_boot_sleep_trigger);
         }
 #endif
       }
@@ -1450,6 +1467,14 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           }
 #else
           baudrate = baudrate_fw_init;
+#endif
+#ifdef UART_DOWNLOAD_FW
+          if (send_boot_sleep_trigger &&
+              !get_prop_int32(PROP_BLUETOOTH_BOOT_SLEEP_TRIGGER)) {
+            VND_LOGD("boot sleep trigger is enabled and its first boot");
+            mchar_fd = uart_init_open(mchar_port, baudrate, 1);
+            close(mchar_fd);
+          }
 #endif
           mchar_fd = uart_init_open(mchar_port, baudrate, 0);
           if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&

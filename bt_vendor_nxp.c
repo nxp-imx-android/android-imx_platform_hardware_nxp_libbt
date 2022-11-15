@@ -72,7 +72,7 @@
 #define CONF_COMMENT '#'
 #define CONF_DELIMITERS " =\n\r\t"
 #define CONF_VALUES_DELIMITERS "=\n\r\t"
-#define CONF_MAX_LINE_LEN 255
+#define CONF_MAX_LINE_LEN 1024
 #define UNUSED(x) (void)(x)
 #define BD_ADDR_LEN 6
 /******************************************************************************
@@ -134,7 +134,6 @@ uint8_t enable_poke_controller = 0;
 static bool send_boot_sleep_trigger = FALSE;
 #endif
 char pFilename_cal_data[MAX_PATH_LEN];
-static pthread_mutex_t dev_file_lock = PTHREAD_MUTEX_INITIALIZER;
 static int rfkill_id = -1;
 static char* rfkill_state_path = NULL;
 int last_baudrate = 0;
@@ -179,17 +178,35 @@ static int set_use_controller_addr(char* p_conf_name, char* p_conf_value,
 }
 
 static int set_mchar_port(char* p_conf_name, char* p_conf_value, int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strcpy(mchar_port, p_conf_value);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_PATH_LEN) {
+    strncpy(mchar_port, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_PATH_LEN);
+  }
   is_uart_port = 1;
   return 0;
 }
 
 static int set_mbt_port(char* p_conf_name, char* p_conf_value, int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strcpy(mbt_port, p_conf_value);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_PATH_LEN) {
+    strncpy(mbt_port, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_PATH_LEN);
+  }
   return 0;
 }
 
@@ -232,9 +249,18 @@ static int set_bt_tx_power(char* p_conf_name, char* p_conf_value, int param) {
 
 static int set_pFilename_fw_init_config_bin(char* p_conf_name,
                                             char* p_conf_value, int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strncpy(pFilename_fw_init_config_bin, p_conf_value, MAX_PATH_LEN);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_PATH_LEN) {
+    strncpy(pFilename_fw_init_config_bin, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_PATH_LEN);
+  }
   return 0;
 }
 static int set_independent_reset_mode(char* p_conf_name, char* p_conf_value,
@@ -269,9 +295,18 @@ static int set_oob_ir_host_gpio_pin(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 static int set_charddev_name(char* p_conf_name, char* p_conf_value, int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strcpy(chrdev_name, p_conf_value);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_DEVICE_LEN) {
+    strncpy(chrdev_name, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_DEVICE_LEN);
+  }
   return 0;
 }
 
@@ -319,18 +354,36 @@ static int set_enable_download_fw(char* p_conf_name, char* p_conf_value,
 
 static int set_pFileName_image(char* p_conf_name, char* p_conf_value,
                                int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strcpy(pFileName_image, p_conf_value);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_PATH_LEN) {
+    strncpy(pFileName_image, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_PATH_LEN);
+  }
   auto_select_fw_name = FALSE;
   return 0;
 }
 
 static int set_pFileName_helper(char* p_conf_name, char* p_conf_value,
                                 int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strcpy(pFileName_helper, p_conf_value);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_PATH_LEN) {
+    strncpy(pFileName_helper, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_PATH_LEN);
+  }
   download_helper = 1;
   return 0;
 }
@@ -386,9 +439,18 @@ static int set_send_boot_sleep_trigger(char* p_conf_name, char* p_conf_value,
 
 static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
                                  int param) {
+  int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
-  strcpy(pFilename_cal_data, p_conf_value);
+
+  len_p_conf_value = strlen(p_conf_value);
+  if (len_p_conf_value < MAX_PATH_LEN) {
+    strncpy(pFilename_cal_data, p_conf_value, len_p_conf_value + 1);
+  } else {
+    VND_LOGE("String length too long, unable to process");
+    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
+             MAX_PATH_LEN);
+  }
   return 0;
 }
 static int set_vhal_trace_level(char* p_conf_name, char* p_conf_value,
@@ -553,6 +615,7 @@ static const conf_entry_t conf_table[] = {
     {"iSecondBaudrate", set_iSecondBaudrate, 0},
     {"uart_sleep_after_dl", set_uart_sleep_after_dl, 0},
     {"enable_poke_controller", set_enable_poke_controller, 0},
+    {"send_boot_sleep_trigger", set_send_boot_sleep_trigger, 0},
 #endif
     {"pFilename_cal_data", set_Filename_cal_data, 0},
     {"vhal_trace_level", set_vhal_trace_level, 0},
@@ -686,7 +749,9 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
     remain = buf[2];
   else
     remain = size - 3;
-
+  if ((int)remain > (size - 3)) {
+    return -1;
+  }
   while ((count - 3) < remain) {
     r = read(fd, buf + count, remain - (count - 3));
     if (r <= 0) {
@@ -1224,7 +1289,7 @@ done:
 void bt_vnd_gpio_configuration(int value) {
   struct gpiohandle_request req;
   struct gpiohandle_data data;
-  int fd, ret;
+  int fd = 0, ret = 0;
 
   /* Open device: gpiochip0 for GPIO bank A */
   fd = open(chrdev_name, 0);
@@ -1235,7 +1300,6 @@ void bt_vnd_gpio_configuration(int value) {
   /* Request GPIO Direction line as out */
   req.lineoffsets[0] = ir_host_gpio_pin;
   req.flags = GPIOHANDLE_REQUEST_OUTPUT;
-  memcpy(req.default_values, &data, sizeof(req.default_values));
   req.lines = 1;
   ret = ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req);
 
@@ -1444,7 +1508,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         }
 #endif
       }
-      pthread_mutex_lock(&dev_file_lock);
 
       if (is_uart_port) {
         /* ensure libbt can talk to the driver, only need open port once */
@@ -1480,7 +1543,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&
               (mchar_fd > 0)) {
             if (bt_vnd_send_inband_ir(baudrate) != 0) {
-              pthread_mutex_unlock(&dev_file_lock);
               return -1;
             }
           }
@@ -1490,7 +1552,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
                    mchar_fd, mchar_port);
         } else {
           VND_LOGE("open UART bt port %s failed fd: %d", mchar_port, mchar_fd);
-          pthread_mutex_unlock(&dev_file_lock);
           return -1;
         }
         bluetooth_opened = get_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED);
@@ -1500,14 +1561,12 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           if (detect_and_download_fw()) {
             VND_LOGE("detect_and_download_fw failed");
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-            pthread_mutex_unlock(&dev_file_lock);
             return -1;
           }
         } else {
           ti.c_cflag |= CRTSCTS;
           if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
             VND_LOGE("Set Flow Control failed!");
-            pthread_mutex_unlock(&dev_file_lock);
             return -1;
           }
           tcflush(mchar_fd, TCIOFLUSH);
@@ -1516,7 +1575,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         ti.c_cflag |= CRTSCTS;
         if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
           VND_LOGE("Set Flow Control failed!");
-          pthread_mutex_unlock(&dev_file_lock);
           return -1;
         }
         tcflush(mchar_fd, TCIOFLUSH);
@@ -1546,7 +1604,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           if (config_uart()) {
             VND_LOGE("config_uart failed");
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
-            pthread_mutex_unlock(&dev_file_lock);
             return -1;
           }
         }
@@ -1557,7 +1614,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
             num++;
             if (num >= 8) {
               VND_LOGE("exceed max retry count, return error");
-              pthread_mutex_unlock(&dev_file_lock);
               return -1;
             } else {
               VND_LOGW("open USB/SD port %s failed fd: %d, retrying", mbt_port,
@@ -1576,12 +1632,10 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         (*fd_array)[idx] = mchar_fd;
         ret = 1;
       }
-      pthread_mutex_unlock(&dev_file_lock);
       VND_LOGD("open serial port over --------------------------------------");
     } break;
     case BT_VND_OP_USERIAL_CLOSE:
       /* mBtChar port is blocked on read. Release the port before we close it */
-      pthread_mutex_lock(&dev_file_lock);
       if (is_uart_port) {
         if (mchar_fd) {
           tcflush(mchar_fd, TCIOFLUSH);
@@ -1599,7 +1653,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           }
         }
       }
-      pthread_mutex_unlock(&dev_file_lock);
       break;
     case BT_VND_OP_GET_LPM_IDLE_TIMEOUT:
       break;

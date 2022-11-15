@@ -46,7 +46,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "009.012"
+#define BT_HAL_VERSION "009.013"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -57,6 +57,7 @@ typedef unsigned char BOOLEAN;
 #define FALSE 0
 #define WRITE_BD_ADDRESS_SIZE 8
 #define MAX_PATH_LEN 512
+#define MAX_DEVICE_LEN 32
 #define MAX_FILE_LEN 128
 #define DOWNLOAD_SUCCESS 0x0
 #define OPEN_SERIAL_PORT_OR_FILE_ERROR 0x1
@@ -71,6 +72,7 @@ typedef unsigned char BOOLEAN;
 #define UNEXPECTED_BEHAVIOUR_IN_SETJMP 0xA
 #define MALLOC_RETURNED_NULL 0xB
 #define START_INDICATION_NOT_FOUND 0xC
+#define INVALID_LEN_TO_SEND 0xD
 
 #define BLE_SET_1M_POWER 0x01
 #define BLE_SET_2M_POWER 0x02

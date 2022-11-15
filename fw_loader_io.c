@@ -342,7 +342,8 @@ uint64 fw_upload_GetTime(void) {
 
   clk_id = CLOCK_MONOTONIC;
   if (!clock_gettime(clk_id, &time)) {
-    millsectime = (time.tv_sec * 1000) + (time.tv_nsec / 1000000);
+    millsectime =
+        (((uint64)time.tv_sec) * 1000) + (((uint64)time.tv_nsec) / 1000000);
   } else {
     VND_LOGE("clock_gettime error: %d", errno);
   }

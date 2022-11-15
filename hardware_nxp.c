@@ -481,6 +481,7 @@ static void hw_config_process_packet(void* packet) {
           if (status == 0) {
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
           }
+          break;
         case HCI_CMD_NXP_CUSTOM_OPCODE:
           if ((stream[opcode_offset + 3] == HCI_CMD_NXP_SUB_ID_BLE_TX_POWER) &&
               set_1m_2m_power) {
@@ -502,8 +503,7 @@ static void hw_config_process_packet(void* packet) {
           } else {
             VND_LOGE("%s Error while reading FW version", __func__);
           }
-          break;
-        }
+        } break;
         case HCI_READ_LOCAL_BDADDR: {
           p_tmp = (char*)(p_evt_buf + 1) + HCI_EVT_CMD_CMPL_LOCAL_BDADDR_ARRAY;
           if (!IS_DEFAULT_BDADDR(p_tmp)) {
@@ -512,20 +512,20 @@ static void hw_config_process_packet(void* packet) {
                      *(p_tmp + 1), *p_tmp);
             ++hw_config.indx; /*Skip writting bd address*/
           }
-          break;
-        }
+        } break;
         case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING: {
           if ((independent_reset_mode == IR_MODE_INBAND_VSC) && (status == 0)) {
             set_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED, 1);
           }
-        }
+        } break;
         case HCI_CMD_NXP_BLE_WAKEUP: {
           if (status != 0) {
             enable_heartbeat_config = FALSE;
           }
           wakeup_event_handler(stream[opcode_offset + 3]);
+        } break;
+        default:
           break;
-        }
       }
     }
   } else {
@@ -925,11 +925,12 @@ static int8 set_wakeup_gpio_config(void) {
   uint16_t opcode;
   int8 ret = -1;
   HC_BT_HDR* packet;
-  if (enable_heartbeat_config == TRUE) {
+  if ((enable_heartbeat_config == TRUE) &&
+      (wake_gpio_config < wakeup_key_num)) {
     opcode = HCI_CMD_NXP_BLE_WAKEUP;
     packet = make_command(
         opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_GPIO_CONFIG_SIZE);
-    if ((packet != NULL) && (wake_gpio_config < wakeup_key_num)) {
+    if (packet != NULL) {
       packet->data[3] = HCI_CMD_NXP_SUB_OCF_GPIO_CONFIG;
       packet->data[4] = wake_gpio_config;
       packet->data[5] = wakeup_gpio_config[wake_gpio_config].gpio_pin;
@@ -941,8 +942,8 @@ static int8 set_wakeup_gpio_config(void) {
                wakeup_gpio_config[wake_gpio_config].high_duration,
                wakeup_gpio_config[wake_gpio_config].low_duration);
       wakeup_gpio_config_state = wake_gpio_config;
-      ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
       wake_gpio_config++;
+      ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
     }
   }
   return ret;

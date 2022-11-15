@@ -1527,12 +1527,13 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
   fw_upload_gen_crc_table();
   memcpy(m_Buffer_CMD5_Header + 8, &headLen,4);
 
-  uiCrc = fw_upload_update_crc(0, m_Buffer_CMD5_Header, 12);
-  uiCrc = SWAPL(uiCrc);
-  memcpy(m_Buffer_CMD5_Header+12,&uiCrc ,4);
+  uiCrc = (uint32)fw_upload_update_crc(0, m_Buffer_CMD5_Header, 12);
+  uiCrc = (uint32)SWAPL(uiCrc);
+  memcpy(m_Buffer_CMD5_Header + 12, &uiCrc, 4);
 
-  uiCrc = fw_upload_update_crc(0, uartConfig, uiLen); // TODO: why uint8 --> int8
-  uiCrc = SWAPL(uiCrc);
+  uiCrc = (uint32)fw_upload_update_crc(0, uartConfig,
+                                       uiLen);  // TODO: why uint8 --> int8
+  uiCrc = (uint32)SWAPL(uiCrc);
   memcpy(uartConfig + uiLen, &uiCrc, 4);
   uiLen += 4;
 
@@ -1562,6 +1563,9 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
         // baudrate.
         close(mchar_fd);
         mchar_fd = init_uart(pPortName, iFirstBaudRate, 0);
+        if (mchar_fd < 0) {
+          return -1;
+        }
         ucLoadPayload = 0;
         uiReUsedInitBaudrate = TRUE;
         continue;
@@ -1578,7 +1582,12 @@ static int32 fw_Change_Baudrate(int8 *pPortName, int32 iFirstBaudRate, int32 iSe
         memcpy(ucBuffer + HDR_LEN, uartConfig, uiLen);
         fw_upload_SendBuffer(uiLenToSend, ucBuffer, TRUE);
         close(mchar_fd);
-        mchar_fd = init_uart(pPortName, iSecondBaudRate, 1); // TODO: there is no check if mchar_fd is valid
+        mchar_fd =
+            init_uart(pPortName, iSecondBaudRate,
+                      1);  // TODO: there is no check if mchar_fd is valid
+        if (mchar_fd < 0) {
+          return -1;
+        }
         ucLoadPayload = 1;
       } else {
         // Download CMD5 header and Payload packet
@@ -1860,11 +1869,14 @@ static uint8* bt_get_fw_config_cmd5_data(void) {
     long data_size;
     fseek(fp, 0, SEEK_END);
     data_size = ftell(fp);
-    if (data_size <= FW_INIT_CONFIG_LEN) {
+    if ((data_size > 0) && (data_size <= FW_INIT_CONFIG_LEN)) {
       fseek(fp, 0, SEEK_SET);
       ret = (fread(fw_init_config_bin, 1, data_size, fp) == data_size)
                 ? fw_init_config_bin
                 : NULL;
+    } else {
+      VND_LOGE("CMD5 File read error:data_size=%ld %s %d", data_size,
+               strerror(errno), errno);
     }
     fclose(fp);
     VND_LOGD("Closing CMD5 file");
@@ -1947,6 +1959,7 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
         VND_LOGV("0xa5 or 0xaa is not received after changing baud rate in 2s.");
         break;
       default:
+        VND_LOGV("Error while changing baud rate");
         break;
     }
     if (result != 0) {
@@ -1987,9 +2000,8 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     return FILESIZE_IS_ZERO;
   }
 
-  pFileBuffer = (uint8 *) malloc(ulTotalFileSize);
-  if(pFileBuffer == NULL)
-  {
+  pFileBuffer = (uint8*)malloc((size_t)ulTotalFileSize);
+  if (pFileBuffer == NULL) {
     VND_LOGV("malloc() returned NULL while allocating size for file");
     fclose(pFile);
     return MALLOC_RETURNED_NULL;
@@ -2003,8 +2015,9 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
     return FEEK_SEEK_ERROR;
   }
 
-  if (pFileBuffer != (void *)0) {
-    ulReadLen = (uint32)fread((void *)pFileBuffer, 1, ulTotalFileSize, pFile);
+  if (pFileBuffer != (void*)0) {
+    ulReadLen = (uint32)fread((void*)pFileBuffer, (size_t)1,
+                              (size_t)ulTotalFileSize, pFile);
     if (ulReadLen != ulTotalFileSize) {
       VND_LOGV("Error:Read File Fail");
       free(pFileBuffer);
@@ -2039,6 +2052,11 @@ static uint32 fw_upload_FW(int8 *pPortName, int32 iBaudRate, int8 *pFileName, in
       VND_LOGV("Number of bytes to be downloaded: %8ld\r", ulTotalFileSize);
       tcflush(mchar_fd, TCIFLUSH);
       do {
+        if (uiLenToSend > ulTotalFileSize) {
+          free(pFileBuffer);
+          fclose(pFile);
+          return INVALID_LEN_TO_SEND;
+        }
         uiLenToSend = fw_upload_V1SendLenBytes(pFileBuffer, uiLenToSend);
       } while (uiLenToSend != 0);
       VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);

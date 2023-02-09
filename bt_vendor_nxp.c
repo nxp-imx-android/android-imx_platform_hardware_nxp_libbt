@@ -99,6 +99,7 @@ int8_t bt_max_power_sel = 0;
 uint8_t bt_set_max_power = 0;
 uint8_t independent_reset_gpio_pin = 0xFF;
 bool enable_sco_config = TRUE;
+bool enable_pdn_recovery = FALSE;
 bool use_controller_addr = TRUE;
 uint8_t ir_host_gpio_pin = 14;
 static char chrdev_name[32] = "/dev/gpiochip5";
@@ -268,6 +269,14 @@ static int set_independent_reset_mode(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
   independent_reset_mode = atoi(p_conf_value);
+  return 0;
+}
+
+static int set_enable_pdn_recovery(char* p_conf_name, char* p_conf_value,
+                                   int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  enable_pdn_recovery = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
   return 0;
 }
 
@@ -617,6 +626,7 @@ static const conf_entry_t conf_table[] = {
     {"enable_poke_controller", set_enable_poke_controller, 0},
     {"send_boot_sleep_trigger", set_send_boot_sleep_trigger, 0},
 #endif
+    {"enable_pdn_recovery", set_enable_pdn_recovery, 0},
     {"pFilename_cal_data", set_Filename_cal_data, 0},
     {"vhal_trace_level", set_vhal_trace_level, 0},
     {"enable_sco_config", set_enable_sco_config, 0},
@@ -1090,6 +1100,10 @@ static int detect_and_download_fw() {
     tcflush(mchar_fd, TCIFLUSH);
     if (uart_sleep_after_dl) usleep(uart_sleep_after_dl * 1000);
   }
+  if (enable_pdn_recovery) {
+    ALOGI("%s:%d\n", PROP_VENDOR_TRIGGER_PDN,
+          get_prop_int32(PROP_VENDOR_TRIGGER_PDN));
+  }
 done:
   return download_ret;
 }
@@ -1424,8 +1438,10 @@ static int bt_vnd_init(const bt_vendor_callbacks_t* p_cb,
     bdaddr = (unsigned char*)malloc(BD_ADDR_LEN);
     if (bdaddr != NULL) {
       memcpy(bdaddr, local_bdaddr, 6);
-      VND_LOGI("bdaddr is %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX", bdaddr[0],
-               bdaddr[1], bdaddr[2], bdaddr[3], bdaddr[4], bdaddr[5]);
+      VND_LOGD(
+          "BD address received from stack "
+          "%02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
+          bdaddr[0], bdaddr[1], bdaddr[2], bdaddr[3], bdaddr[4], bdaddr[5]);
     }
   }
   return 0;
@@ -1490,6 +1506,18 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       int bluetooth_opened;
       int num = 0;
       int32_t baudrate = 0;
+      if (enable_pdn_recovery == TRUE) {
+        int init_attempted = get_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED);
+        if (init_attempted >= PDN_RECOVERY_THRESHOLD) {
+          ALOGE("%s: %s(%d) > %d, Triggering PDn recovery.\n", __FUNCTION__,
+                PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted,
+                PDN_RECOVERY_THRESHOLD);
+          set_prop_int32(PROP_VENDOR_TRIGGER_PDN, 1);
+          set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, 0);
+        } else {
+          set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted + 1);
+        }
+      }
       if (is_uart_port) {
         VND_LOGD("baudrate_bt %d", baudrate_bt);
         VND_LOGD("baudrate_fw_init %d", baudrate_fw_init);
@@ -1505,6 +1533,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VND_LOGD("uart_sleep_after_dl %d", uart_sleep_after_dl);
           VND_LOGD("independent_reset_mode %d", independent_reset_mode);
           VND_LOGD("send_boot_sleep_trigger %d", send_boot_sleep_trigger);
+          VND_LOGD("enable_pdn_recovery %d", enable_pdn_recovery);
         }
 #endif
       }
@@ -1631,6 +1660,10 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       for (idx = 0; idx < CH_MAX; idx++) {
         (*fd_array)[idx] = mchar_fd;
         ret = 1;
+      }
+      if (enable_pdn_recovery == TRUE) {
+        // Reset PROP_BLUETOOTH_INIT_ATTEMPTED as init is successful
+        set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, 0);
       }
       VND_LOGD("open serial port over --------------------------------------");
     } break;

@@ -506,13 +506,21 @@ static void hw_config_process_packet(void* packet) {
         } break;
         case HCI_READ_LOCAL_BDADDR: {
           p_tmp = (char*)(p_evt_buf + 1) + HCI_EVT_CMD_CMPL_LOCAL_BDADDR_ARRAY;
-          if (!IS_DEFAULT_BDADDR(p_tmp)) {
-            VND_LOGI("Controller OTP bdaddr %02X:%02X:%02X:%02X:%02X:%02X",
-                     *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
-                     *(p_tmp + 1), *p_tmp);
+          VND_LOGI("Controller BD address:  %02X:%02X:%02X:%02X:%02X:%02X",
+                   *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
+                   *(p_tmp + 1), *p_tmp);
+          if (use_controller_addr && !IS_DEFAULT_BDADDR(p_tmp)) {
             ++hw_config.indx; /*Skip writting bd address*/
           }
         } break;
+        case HCI_CMD_NXP_WRITE_BD_ADDRESS: {
+          if (status == 0) {
+            VND_LOGI("Controller BD address:  %02X:%02X:%02X:%02X:%02X:%02X",
+                     write_bd_address[7], write_bd_address[6],
+                     write_bd_address[5], write_bd_address[4],
+                     write_bd_address[3], write_bd_address[2]);
+          }
+        }
         case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING: {
           if ((independent_reset_mode == IR_MODE_INBAND_VSC) && (status == 0)) {
             set_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED, 1);
@@ -563,8 +571,11 @@ static void hw_config_seq(void* packet) {
       if (enable_heartbeat_config == TRUE) {
         pthread_create(&p_headtbeat, NULL, send_heartbeat_thread, NULL);
       }
-    } else {
-      VND_LOGE("Invalid HW config sequence");
+    }
+  } else {
+    VND_LOGE("Invalid HW config sequence");
+    if (vnd_cb) {
+      vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_FAIL);
     }
   }
 }
@@ -587,9 +598,10 @@ static int8 bt_bdaddress_set(void) {
   packet = make_command(opcode, WRITE_BD_ADDRESS_SIZE);
   if (packet) {
     memcpy(&packet->data[3], write_bd_address, WRITE_BD_ADDRESS_SIZE);
-    VND_LOGD("bdaddr is %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
-             write_bd_address[7], write_bd_address[6], write_bd_address[5],
-             write_bd_address[4], write_bd_address[3], write_bd_address[2]);
+    VND_LOGD(
+        "Writting new BD Address %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
+        write_bd_address[7], write_bd_address[6], write_bd_address[5],
+        write_bd_address[4], write_bd_address[3], write_bd_address[2]);
     ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
   }
   return ret;
@@ -632,10 +644,10 @@ static int8 hw_config_read_bdaddr(void) {
   uint16_t opcode;
   HC_BT_HDR* packet;
   int8 ret = -1;
-  if ((use_controller_addr == TRUE) && (write_bdaddrss == 0)) {
+  if (write_bdaddrss == 0) {
     opcode = HCI_READ_LOCAL_BDADDR;
     packet = make_command(opcode, 0);
-    ret = hw_bt_send_packet(packet, opcode,hw_config_seq);
+    ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
   }
   return ret;
 }

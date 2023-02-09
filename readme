@@ -100,6 +100,11 @@ optional keys are listed below:
 				enable_sco_config = 1 (Enable SCO cofig, default)
 				enable_sco_config = 0 (Disable SCO config)
 
+	enable_pdn_recovery: Enable PDn recovery mechanism support.
+				Supported values:
+				enable_pdn_recovery = 0 (Disable, default)
+				enable_pdn_recovery = 1 (Enable)
+
 	vhal_trace_level : Select log level for BT VHAL module. Note each level will include messages from previous level as well.
 				Supported values:
 				vhal_trace_level = 0    No trace messages
@@ -197,3 +202,8 @@ enable_poke_controller: Support for faster firmware download
 	baudrate_dl_image: baudrate used when start download fw. The default value is 3000000 in libbt, only need to configure it if choose other baudrate.  
 
 	uart_sleep_after_dl: sleep time after bt fw is downloaded, unit in ms. The default value is 100 ms, only need to configure it if need sleep for more time.
+
+	send_boot_sleep_trigger: Used to send trigger from Boot Sleep Patch
+		Supported Values:
+		send_boot_sleep_trigger = 0 (Default)
+		send_boot_sleep_trigger = 1 (Enable sending  Boot Sleep Patch Trigger)

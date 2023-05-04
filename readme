@@ -114,11 +114,21 @@ optional keys are listed below:
 				vhal_trace_level = 4    Debug messages
 				vhal_trace_level = 5    Verbose trace message
 
+	enable_lpm : Configure low power mode (Host to Controller Sleep (H2C))
+				Supported values:
+				enable_lpm = 0    (Disable, Default)
+				enable_lpm = 1    (Enable)
+
+	lpm_timeout_ms : Set host timeout in milliseconds after which controller is triggered to sleep.
+				Example:
+				lpm_timeout_ms = 300 (Default value is 1000 ms)
+					Note: Make sure enable_lpm is enabled to use this configuration.
+
 Below parameters are for fw download, if not use fw download by libbt, don't set any of below in conf file
 
-	enable_download_fw: set to 1 if need to download uart bt fw by libbt when bootup, default value is 0 in libbt, it always download combo fw by wifi side
+	enable_download_fw: set to 1 if need to download uart bt fw by libbt when bootup, default value is 0 in libbt, it always download combo fw by wifi side.
 
-enable_poke_controller: Support for faster firmware download
+	enable_poke_controller: Support for faster firmware download
                         Supported values:
                         enable_poke_controller = 0 (default)
                         enable_poke_controller = 1 (for IW512, IW611, IW612,AW611HN/AOA,AW611HN/AOB,9098 chipsets)

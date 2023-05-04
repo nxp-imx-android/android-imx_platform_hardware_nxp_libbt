@@ -1,7 +1,12 @@
 # Change Log
 All notable changes in Bluetooth Vendor Hardware Abstraction Layer(BT VHAL) will be documented in this file.
 
-## [009.013] - 2022-Oct
+## [009.015] - 2023-March-24
+
+### Added
+- Added Low Power Mode(LPM) support via Inband method
+
+## [009.013] - 2022-Oct-13
 
 ### Fixed
 - Fixed all coverity issues.

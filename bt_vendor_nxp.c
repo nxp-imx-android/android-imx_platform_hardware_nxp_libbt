@@ -119,6 +119,11 @@ uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0x00, /* 2nd */
     0x00  /* 1st */
 };
+/*Low power mode LPM enables controller to go in sleep mode, this command
+ * enables host to controller sleep(H2C)*/
+static bool enable_lpm = FALSE;
+bool lpm_configured = FALSE;
+static int32_t lpm_timeout_ms = 1000;
 #ifdef UART_DOWNLOAD_FW
 static int enable_download_fw = 0;
 static int uart_sleep_after_dl = 100;
@@ -215,6 +220,20 @@ static int set_baudrate_bt(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
   baudrate_bt = atoi(p_conf_value);
+  return 0;
+}
+
+static int set_enable_lpm(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  enable_lpm = atoi(p_conf_value) > 0 ? TRUE : FALSE;
+  return 0;
+}
+
+static int set_lpm_timeout(char* p_conf_name, char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  lpm_timeout_ms = atoi(p_conf_value);
   return 0;
 }
 
@@ -615,6 +634,8 @@ static const conf_entry_t conf_table[] = {
     {"chardev_name", set_charddev_name, 0},
     {"independent_reset_mode", set_independent_reset_mode, 0},
     {"send_oob_ir_trigger", set_send_oob_ir_trigger, 0},
+    {"enable_lpm", set_enable_lpm, 0},
+    {"lpm_timeout", set_lpm_timeout, 0},
 #ifdef UART_DOWNLOAD_FW
     {"enable_download_fw", set_enable_download_fw, 0},
     {"pFileName_image", set_pFileName_image, 0},
@@ -1534,6 +1555,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VND_LOGD("independent_reset_mode %d", independent_reset_mode);
           VND_LOGD("send_boot_sleep_trigger %d", send_boot_sleep_trigger);
           VND_LOGD("enable_pdn_recovery %d", enable_pdn_recovery);
+          VND_LOGD("enable_lpm %d", enable_lpm);
         }
 #endif
       }
@@ -1687,14 +1709,41 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         }
       }
       break;
-    case BT_VND_OP_GET_LPM_IDLE_TIMEOUT:
-      break;
+    case BT_VND_OP_GET_LPM_IDLE_TIMEOUT: {
+      uint32_t* timeout_ms = (uint32_t*)param;
+      *timeout_ms = enable_lpm ? lpm_timeout_ms : 0;
+      VND_LOGI("LPM timeout = %d",*timeout_ms);
+    } break;
     case BT_VND_OP_LPM_SET_MODE:
+      if (enable_lpm == TRUE) {
+        uint8_t* lpm_mode = (uint8_t*)param;
+        if (*lpm_mode == BT_VND_LPM_ENABLE) {
+          VND_LOGI("Enable LPM mode");
+          ret = hw_bt_configure_lpm(BT_SET_SLEEP_MODE);
+        } else {
+          VND_LOGI("Disable LPM mode");
+          ret = hw_bt_configure_lpm(BT_SET_FULL_POWER_MODE);
+        }
+      }
       if (vnd_cb) {
-        vnd_cb->lpm_cb(ret);
+        if (ret == 0) {
+          vnd_cb->lpm_cb(BT_VND_OP_RESULT_SUCCESS);
+        } else {
+          vnd_cb->lpm_cb(BT_VND_OP_RESULT_FAIL);
+        }
       }
       break;
     case BT_VND_OP_LPM_WAKE_SET_STATE:
+      if (lpm_configured == TRUE) {
+        uint8_t* wake_state = (uint8_t*)param;
+        if (*wake_state == BT_VND_LPM_WAKE_ASSERT) {
+          VND_LOGI("LPM: Wakeup BT Device");
+          VND_LOGI("Assert Status:%d\n", ioctl(mchar_fd, TIOCCBRK));
+        } else {
+          VND_LOGI("LPM: Allow BT Device to sleep");
+          VND_LOGI("Deassert Status:%d\n", ioctl(mchar_fd, TIOCSBRK));
+        }
+      }
       break;
     default:
       ret = -1;

@@ -46,7 +46,7 @@ typedef unsigned char BOOLEAN;
 **  Constants & Macros
 ******************************************************************************/
 
-#define BT_HAL_VERSION "009.014"
+#define BT_HAL_VERSION "009.015"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -76,6 +76,9 @@ typedef unsigned char BOOLEAN;
 
 #define BLE_SET_1M_POWER 0x01
 #define BLE_SET_2M_POWER 0x02
+
+#define BT_SET_SLEEP_MODE 0x02
+#define BT_SET_FULL_POWER_MODE 0x03
 
 #define NXP_WAKEUP_ADV_PATTERN_LENGTH 16  // company id + vendor information
 #define PROP_BLUETOOTH_INIT_ATTEMPTED "bluetooth.nxp.init_attempted"
@@ -145,6 +148,8 @@ extern wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num];
 extern wakeup_adv_pattern_config_t wakeup_adv_config;
 extern wakeup_scan_param_config_t wakeup_scan_param_config;
 extern wakeup_local_param_config_t wakup_local_param_config;
+extern bool lpm_configured;
+int8 hw_bt_configure_lpm(uint8 sleep_mode);
 void wakeup_kill_heartbeat_thread(void);
 #ifdef UART_DOWNLOAD_FW
 extern uint8_t enable_poke_controller;

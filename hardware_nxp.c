@@ -89,6 +89,8 @@
 #define HCI_CMD_NXP_INDEPENDENT_RESET_SETTING 0xFC0D
 #define HCI_CMD_NXP_INDEPENDENT_RESET_SETTING_SIZE 0x02
 #define BT_CONFIG_DATA_SIZE 28
+#define HCI_CMD_NXP_SET_BT_SLEEP_MODE 0xFC23
+#define HCI_CMD_NXP_SET_BT_SLEEP_MODE_SIZE 0x03
 #define STREAM_TO_UINT16(u16, p)                                \
   do {                                                          \
     u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); \
@@ -237,6 +239,8 @@ static char* cmd_to_str(uint16_t cmd) {
       return "write_bd_address";
     case HCI_CMD_NXP_BLE_WAKEUP:
       return "ble_wake_config";
+    case HCI_CMD_NXP_SET_BT_SLEEP_MODE:
+      return "configure_lpm";
     default:
       break;
   }
@@ -462,83 +466,93 @@ static void hw_config_process_packet(void* packet) {
   uint8_t *stream, event, event_code, status, opcode_offset;
   uint16_t opcode, len;
   char* p_tmp;
-  HC_BT_HDR* p_evt_buf = (HC_BT_HDR*)packet;
-  stream = ((HC_BT_HDR*)packet)->data;
-  event = ((HC_BT_HDR*)packet)->event;
-  len = ((HC_BT_HDR*)packet)->len;
-  opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1; /*Skip num packets.*/
-  VND_LOGD("Packet length %d", len);
-  /*Minimum length of commad event should be 6 bytes*/
-  if ((event == HCI_PACKET_TYPE_EVENT) && (len >= 6)) {
-    event_code = stream[0];
-    opcode = stream[opcode_offset] | (stream[opcode_offset + 1] << 8);
-    if (event_code == HCI_COMMAND_COMPLETE_EVT) {
-      status = stream[opcode_offset + 2];
-      VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x", opcode,
-               cmd_to_str(opcode), status);
-      switch (opcode) {
-        case HCI_CMD_NXP_RESET:
-          if (status == 0) {
-            set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
-          }
-          break;
-        case HCI_CMD_NXP_CUSTOM_OPCODE:
-          if ((stream[opcode_offset + 3] == HCI_CMD_NXP_SUB_ID_BLE_TX_POWER) &&
-              set_1m_2m_power) {
-            hw_config.skip_seq_incr = 1;
-          }
-          break;
-        case HCI_CMD_NXP_READ_FW_REVISION: {
-          VND_LOGD("%s Read FW version reply recieved", __func__);
-          if ((status == 0) && (len >= 14)) {
-            if (len >= 15) {
-              VND_LOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
-                       stream[6], stream[9], stream[14]);
-            } else {
-              VND_LOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7],
-                       stream[6], stream[9]);
+  if (packet != NULL) {
+    HC_BT_HDR* p_evt_buf = (HC_BT_HDR*)packet;
+    stream = ((HC_BT_HDR*)packet)->data;
+    event = ((HC_BT_HDR*)packet)->event;
+    len = ((HC_BT_HDR*)packet)->len;
+    opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1; /*Skip num packets.*/
+    VND_LOGD("Packet length %d", len);
+    /*Minimum length of command event should be 6 bytes*/
+    if ((event == HCI_PACKET_TYPE_EVENT) && (len >= 6)) {
+      event_code = stream[0];
+      opcode = stream[opcode_offset] | (stream[opcode_offset + 1] << 8);
+      if (event_code == HCI_COMMAND_COMPLETE_EVT) {
+        status = stream[opcode_offset + 2];
+        VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x",
+                 opcode, cmd_to_str(opcode), status);
+        switch (opcode) {
+          case HCI_CMD_NXP_RESET:
+            if (status == 0) {
+              set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 1);
             }
-            VND_LOGI("ROM version: %02X %02X %02X %02X", stream[10], stream[11],
-                     stream[12], stream[13]);
-          } else {
-            VND_LOGE("%s Error while reading FW version", __func__);
-          }
-        } break;
-        case HCI_READ_LOCAL_BDADDR: {
-          p_tmp = (char*)(p_evt_buf + 1) + HCI_EVT_CMD_CMPL_LOCAL_BDADDR_ARRAY;
-          VND_LOGI("Controller BD address:  %02X:%02X:%02X:%02X:%02X:%02X",
-                   *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
-                   *(p_tmp + 1), *p_tmp);
-          if (use_controller_addr && !IS_DEFAULT_BDADDR(p_tmp)) {
-            ++hw_config.indx; /*Skip writting bd address*/
-          }
-        } break;
-        case HCI_CMD_NXP_WRITE_BD_ADDRESS: {
-          if (status == 0) {
+            break;
+          case HCI_CMD_NXP_CUSTOM_OPCODE:
+            if ((stream[opcode_offset + 3] ==
+                 HCI_CMD_NXP_SUB_ID_BLE_TX_POWER) &&
+                set_1m_2m_power) {
+              hw_config.skip_seq_incr = 1;
+            }
+            break;
+          case HCI_CMD_NXP_READ_FW_REVISION: {
+            VND_LOGD("%s Read FW version reply recieved", __func__);
+            if ((status == 0) && (len >= 14)) {
+              if (len >= 15) {
+                VND_LOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
+                         stream[6], stream[9], stream[14]);
+              } else {
+                VND_LOGI("FW version: %d.%d.%d.p%d", stream[8], stream[7],
+                         stream[6], stream[9]);
+              }
+              VND_LOGI("ROM version: %02X %02X %02X %02X", stream[10],
+                       stream[11], stream[12], stream[13]);
+            } else {
+              VND_LOGE("%s Error while reading FW version", __func__);
+            }
+          } break;
+          case HCI_READ_LOCAL_BDADDR: {
+            p_tmp =
+                (char*)(p_evt_buf + 1) + HCI_EVT_CMD_CMPL_LOCAL_BDADDR_ARRAY;
             VND_LOGI("Controller BD address:  %02X:%02X:%02X:%02X:%02X:%02X",
-                     write_bd_address[7], write_bd_address[6],
-                     write_bd_address[5], write_bd_address[4],
-                     write_bd_address[3], write_bd_address[2]);
+                     *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
+                     *(p_tmp + 1), *p_tmp);
+            if (use_controller_addr && !IS_DEFAULT_BDADDR(p_tmp)) {
+              ++hw_config.indx; /*Skip writting bd address*/
+            }
+          } break;
+          case HCI_CMD_NXP_WRITE_BD_ADDRESS: {
+            if (status == 0) {
+              VND_LOGI("Controller BD address:  %02X:%02X:%02X:%02X:%02X:%02X",
+                       write_bd_address[7], write_bd_address[6],
+                       write_bd_address[5], write_bd_address[4],
+                       write_bd_address[3], write_bd_address[2]);
+            }
           }
+          case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING: {
+            if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&
+                (status == 0)) {
+              set_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED, 1);
+            }
+          } break;
+          case HCI_CMD_NXP_BLE_WAKEUP: {
+            if (status != 0) {
+              enable_heartbeat_config = FALSE;
+            }
+            wakeup_event_handler(stream[opcode_offset + 3]);
+          } break;
+          case HCI_CMD_NXP_SET_BT_SLEEP_MODE:{
+            if (status == 0) {
+            lpm_configured = TRUE;
+            }
+          }break;
+          default:
+            break;
         }
-        case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING: {
-          if ((independent_reset_mode == IR_MODE_INBAND_VSC) && (status == 0)) {
-            set_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED, 1);
-          }
-        } break;
-        case HCI_CMD_NXP_BLE_WAKEUP: {
-          if (status != 0) {
-            enable_heartbeat_config = FALSE;
-          }
-          wakeup_event_handler(stream[opcode_offset + 3]);
-        } break;
-        default:
-          break;
       }
+    } else {
+      VND_LOGE("Unexpected packet received. Event type:%02x Len:%02x", event,
+               len);
     }
-  } else {
-    VND_LOGE("Unexpected packet received. Event type:%02x Len:%02x", event,
-             len);
   }
 }
 
@@ -552,7 +566,7 @@ static void hw_config_process_packet(void* packet) {
 **
 *******************************************************************************/
 static void hw_config_seq(void* packet) {
-  (packet == NULL) ?: hw_config_process_packet(packet);
+  hw_config_process_packet(packet);
   VND_LOGD("skip=%d ", hw_config.skip_seq_incr);
   if (hw_config.skip_seq_incr) {
     hw_config.skip_seq_incr = 0;
@@ -871,6 +885,32 @@ static int8 hw_bt_enable_independent_reset(void) {
       }
       ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
     }
+  }
+  return ret;
+}
+
+/******************************************************************************
+ **
+ ** Function:      hw_bt_configure_lpm
+ **
+ ** Description:   Sends command to configure low power mode
+ **
+ ** Return Value:  0 if success, -1 otherwise
+ **
+ *****************************************************************************/
+int8 hw_bt_configure_lpm(uint8 sleep_mode) {
+  uint16_t opcode;
+  HC_BT_HDR* packet;
+  uint8_t* stream;
+  int8 ret = -1;
+  opcode = HCI_CMD_NXP_SET_BT_SLEEP_MODE;
+  packet = make_command(opcode, HCI_CMD_NXP_SET_BT_SLEEP_MODE_SIZE);
+  if (packet) {
+    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream[0] = sleep_mode;
+    stream[1] = 0;
+    stream[2] = 0;
+    ret = hw_bt_send_packet(packet, opcode, hw_config_process_packet);
   }
   return ret;
 }

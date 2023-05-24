@@ -182,7 +182,7 @@ static int set_use_controller_addr(char* p_conf_name, char* p_conf_value,
   use_controller_addr = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
   return 0;
 }
-
+#define MCHAR_PORT_PROP "ro.boot.bluetooth.mchar_port"
 static int set_mchar_port(char* p_conf_name, char* p_conf_value, int param) {
   int len_p_conf_value = 0;
   UNUSED(p_conf_name);
@@ -190,7 +190,8 @@ static int set_mchar_port(char* p_conf_name, char* p_conf_value, int param) {
 
   len_p_conf_value = strlen(p_conf_value);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(mchar_port, p_conf_value, len_p_conf_value + 1);
+    property_get(MCHAR_PORT_PROP, mchar_port, p_conf_value);
+    VND_LOGI("the mchar_port is %s", mchar_port);
   } else {
     VND_LOGE("String length too long, unable to process");
     VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,

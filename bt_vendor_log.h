@@ -16,18 +16,34 @@
  *
  ******************************************************************************/
 
-#ifndef _BT_VENDOR_LOG_H
-#define _BT_VENDOR_LOG_H
+/******************************************************************************
+ *
+ *  Filename:      bt_vendor_log.h
+ *
+ *  Description:   VHAL specific logs definition
+ *
+ ******************************************************************************/
+
+#ifndef BT_VENDOR_LOG_H
+#define BT_VENDOR_LOG_H
+
+/*============================== Include Files ===============================*/
 
 #include <log/log.h>
 
+/*================================ Global Vars================================*/
+
+extern int vhal_trace_level;
+
+/*================================== Typedefs=================================*/
+
+/*================================== Macros ==================================*/
 #define BT_TRACE_LEVEL_NONE 0    /* No trace messages to be generated    */
 #define BT_TRACE_LEVEL_ERROR 1   /* Error condition trace messages       */
 #define BT_TRACE_LEVEL_WARNING 2 /* Warning condition trace messages     */
 #define BT_TRACE_LEVEL_INFO 3    /* Generic Info                         */
 #define BT_TRACE_LEVEL_DEBUG 4   /* Debug messages for events            */
 #define BT_TRACE_LEVEL_VERBOSE 5 /* Full debug messages                  */
-extern int vhal_trace_level;
 
 #if (BT_TRACE_LEVEL_ERROR <= VHAL_LOG_LEVEL)
 #define VND_LOGE(fmt, ...)                                           \
@@ -82,4 +98,4 @@ extern int vhal_trace_level;
 #define VND_LOGV(fmt, ...)
 #endif
 
-#endif
+#endif  // BT_VENDOR_LOG_H

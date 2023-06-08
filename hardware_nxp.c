@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2012-2013, 2020-2022 NXP
+ *  Copyright 2012-2013, 2020-2023 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,7 +16,17 @@
  *
  ******************************************************************************/
 
+/******************************************************************************
+ *
+ *  Filename:      hardware_nxp.c
+ *
+ *  Description:   Hardware controller configuration functions
+ *
+ ******************************************************************************/
+
 #define LOG_TAG "hardware_nxp"
+
+/*============================== Include Files ===============================*/
 
 #include <assert.h>
 #include <pthread.h>
@@ -24,12 +34,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bt_vendor_log.h"
 #include "bt_vendor_nxp.h"
 #include "fw_loader_io.h"
-#include "bt_vendor_log.h"
-/******************************************************************************
-**  Constants & Macros
-******************************************************************************/
+
+/*================================== Macros ==================================*/
 /*****************************************************************************
  * ** copy from bt_hci_bdroid.h
  * ******************************************************************************/
@@ -122,9 +131,7 @@
 #define HCI_CMD_NXP_LOCAL_PARAM_CONFIG_SIZE 1
 #define TIMER_UNIT_MS_TO_US 1000
 
-/******************************************************************************
-**  Local type definitions
-******************************************************************************/
+/*================================== Typedefs=================================*/
 
 struct bt_evt_param_t {
   uint16_t cmd;
@@ -132,10 +139,9 @@ struct bt_evt_param_t {
 };
 typedef int8 (*hw_config_fun_ptr)(void);
 typedef void (*hw_config_reply_handler)(void*);
-/***********************************************************
- *  Prototype
- ***********************************************************
- */
+
+/*============================ Function Prototypes ===========================*/
+
 static int8 hw_bt_send_reset(void);
 static int8 hw_config_set_bdaddr(void);
 static int8 hw_bt_read_fw_revision(void);
@@ -152,10 +158,9 @@ static int8 set_wakeup_local_parameter(void);
 static int8 set_wakeup_gpio_config(void);
 static void* send_heartbeat_thread(void* data);
 static void wakeup_event_handler(uint8_t sub_ocf);
-/***********************************************************
- *  Local variables
- ***********************************************************
- */
+
+/*================================ Global Vars================================*/
+
 static struct {
   /*Pointer to Hardware Configuation Array*/
   hw_config_fun_ptr* seq_arr;
@@ -205,9 +210,8 @@ static unsigned char wakeup_gpio_config_state = wakeup_key_num;
 static bool send_heartbeat = FALSE;
 static uint8_t wake_gpio_config = 0;
 
-/***********************************************************
-**  HELPER FUNCTIONS
-***********************************************************/
+/*============================== Coded Procedures ============================*/
+
 #if (BT_TRACE_LEVEL_DEBUG <= VHAL_LOG_LEVEL)
 static char* cmd_to_str(uint16_t cmd) {
   switch (cmd) {
@@ -257,12 +261,15 @@ static char* cmd_to_str(uint16_t cmd) {
  ** Return Value:  0 if success, -1 otherwise
  **
  *****************************************************************************/
-int8 hw_bt_send_packet(HC_BT_HDR* packet, uint16_t opcode,hw_config_reply_handler reply_handler) {
+int8 hw_bt_send_packet(HC_BT_HDR* packet, uint16_t opcode,
+                       hw_config_reply_handler reply_handler) {
   int8 ret = -1;
   if (packet) {
     if (vnd_cb->xmit_cb(opcode, packet, reply_handler)) {
       VND_LOGD("Sending hci command 0x%04hX (%s)", opcode, cmd_to_str(opcode));
       ret = 0;
+    } else {
+      VND_LOGE("Error while sending packet %04x", opcode);
     }
   } else {
     VND_LOGE("%s Error:Sending Invalid Packet", __func__);
@@ -527,7 +534,7 @@ static void hw_config_process_packet(void* packet) {
                        write_bd_address[5], write_bd_address[4],
                        write_bd_address[3], write_bd_address[2]);
             }
-          }
+          } break;
           case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING: {
             if ((independent_reset_mode == IR_MODE_INBAND_VSC) &&
                 (status == 0)) {
@@ -540,11 +547,11 @@ static void hw_config_process_packet(void* packet) {
             }
             wakeup_event_handler(stream[opcode_offset + 3]);
           } break;
-          case HCI_CMD_NXP_SET_BT_SLEEP_MODE:{
+          case HCI_CMD_NXP_SET_BT_SLEEP_MODE: {
             if (status == 0) {
-            lpm_configured = TRUE;
+              lpm_configured = TRUE;
             }
-          }break;
+          } break;
           default:
             break;
         }
@@ -578,12 +585,15 @@ static void hw_config_seq(void* packet) {
     if (hw_config_seq_arr[hw_config.indx]() != 0) {
       hw_config_next();
     }
-  } else if(hw_config.indx == hw_config.size){
+  } else if (hw_config.indx == hw_config.size) {
     VND_LOGI("FW config completed!");
     if (vnd_cb) {
       vnd_cb->fwcfg_cb(BT_VND_OP_RESULT_SUCCESS);
       if (enable_heartbeat_config == TRUE) {
-        pthread_create(&p_headtbeat, NULL, send_heartbeat_thread, NULL);
+        int status;
+        status =
+            pthread_create(&p_headtbeat, NULL, send_heartbeat_thread, NULL);
+        VND_LOGV("pthread_create status %d", status);
       }
     }
   } else {
@@ -684,7 +694,6 @@ void hw_config_start(void) {
     wake_gpio_config = 0;
   }
   hw_config_seq(NULL);
-  
 }
 
 /*******************************************************************************
@@ -701,7 +710,7 @@ static int8 hw_bt_send_reset(void) {
   HC_BT_HDR* packet;
   opcode = HCI_CMD_NXP_RESET;
   packet = make_command(opcode, 0);
-  return hw_bt_send_packet(packet, opcode,hw_config_seq);
+  return hw_bt_send_packet(packet, opcode, hw_config_seq);
 }
 
 /******************************************************************************
@@ -725,6 +734,8 @@ static int hw_bt_load_cal_file(const char* cal_file_name, uint8_t* cal_data,
   if (fp == NULL) {
     VND_LOGD("Can't open calibration file: %s ", cal_file_name);
     return ret;
+  } else {
+    VND_LOGD("Calibration file: %s opened successfully", cal_file_name);
   }
   while ((fscanf(fp, " %2x", &data) == 1)) {
     if (data_len >= (*cal_data_size)) {
@@ -943,7 +954,7 @@ static void* send_heartbeat_thread(void* data) {
   uint16_t opcode = HCI_CMD_NXP_BLE_WAKEUP;
   HC_BT_HDR* packet;
   (void)data;
-  
+
   send_heartbeat = TRUE;
   VND_LOGD("Starting Heartbeat Thread");
   signal(SIGUSR1, kill_thread_signal_handler);
@@ -1010,7 +1021,7 @@ static int8 set_wakeup_gpio_config(void) {
 ** Returns          None
 **
 *******************************************************************************/
-static int8  set_wakeup_adv_pattern(void) {
+static int8 set_wakeup_adv_pattern(void) {
   uint16_t opcode;
   int8 ret = -1;
   HC_BT_HDR* packet;

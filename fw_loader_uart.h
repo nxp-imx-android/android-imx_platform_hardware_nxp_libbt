@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2009-2022 NXP
+ *  Copyright 2009-2023 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,15 +16,22 @@
  *
  ******************************************************************************/
 
-#ifndef _FW_LOADER_H
-#define _FW_LOADER_H
-/*===================== Include Files ============================================*/
+/******************************************************************************
+ *
+ *  Filename:      fw_loader_uart.h
+ *
+ *  Description:   Firmware loader vesion 1 and 3 function declarations
+ *
+ ******************************************************************************/
+
+#ifndef FW_LOADER_H
+#define FW_LOADER_H
+/*============================== Include Files ===============================*/
 #include "bt_vendor_nxp.h"
 
-/*==================== Typedefs =================================================*/
+/*================================== Typedefs=================================*/
 
-
-/*===================== Macros ===================================================*/
+/*================================== Macros ==================================*/
 
 typedef struct {
   uint32 iBaudRate;
@@ -35,12 +42,13 @@ typedef struct {
 extern int mchar_fd;
 extern uint8_t independent_reset_mode;
 
-/*===================== Global Vars ==============================================*/
+/*================================ Global Vars================================*/
 
-/*==================== Function Prototypes ======================================*/
+/*============================ Function Prototypes ===========================*/
 
 void init_crc8();
 BOOLEAN bt_vnd_mrvl_check_fw_status();
-int bt_vnd_mrvl_download_fw(int8 *pPortName, int32 iBaudRate, int8 *pFileName, int32 iSecondBaudRate);
+int bt_vnd_mrvl_download_fw(int8* pPortName, int32 iBaudRate, int8* pFileName,
+                            int32 iSecondBaudRate);
 void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size);
-#endif  // _FW_LOADER_H
+#endif  // FW_LOADER_H

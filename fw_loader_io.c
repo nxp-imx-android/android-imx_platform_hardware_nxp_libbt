@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2009-2022 NXP
+ *  Copyright 2009-2023 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,24 +16,34 @@
  *
  ******************************************************************************/
 
-/*===================== Include Files ============================================*/
-#include "fw_loader_io.h"
+/******************************************************************************
+ *
+ *  Filename:      fw_loader_io.c
+ *
+ *  Description:   Kernel Input/Output functions
+ *
+ ******************************************************************************/
 
 #define LOG_TAG "fw_loader_linux"
+
+/*============================== Include Files ===============================*/
+#include "fw_loader_io.h"
+
 #include <cutils/properties.h>
 #include <errno.h>
+#include <string.h>
 
 #include "bt_vendor_log.h"
-/*===================== Macros ===================================================*/
+/*================================== Macros ==================================*/
 #define TIMEOUT_SEC 6
 
-/*==================== Typedefs =================================================*/
+/*================================== Typedefs=================================*/
 
-/*===================== Global Vars ==============================================*/
+/*================================ Varaibles =================================*/
 
-/*==================== Function Prototypes ======================================*/
+/*============================ Function Prototypes ===========================*/
 
-/*==================== Coded Procedures =========================================*/
+/*============================== Coded Procedures ============================*/
 
 /******************************************************************************
  *
@@ -56,7 +66,7 @@
  *
 
 *****************************************************************************/
-BOOLEAN fw_upload_lenValid(uint16 *uiLenToSend, uint8 *ucArray) {
+BOOLEAN fw_upload_lenValid(uint16* uiLenToSend, uint8* ucArray) {
   uint16 uiLen, uiLenComp;
   uint16 uiXorOfLen = 0xFFFF;
   uiLen = ((ucArray[1] & 0xFF) | ((ucArray[2] << 8) & 0xFF00));
@@ -67,6 +77,8 @@ BOOLEAN fw_upload_lenValid(uint16 *uiLenToSend, uint8 *ucArray) {
     *uiLenToSend = uiLen;
     return TRUE;
   } else {
+    VND_LOGE("Length and complement check failed uiLen = %d uiLenComp = %d",
+             uiLen, uiLenComp);
     return FALSE;
   }
 }
@@ -91,9 +103,7 @@ BOOLEAN fw_upload_lenValid(uint16 *uiLenToSend, uint8 *ucArray) {
  *   None.
  *
  *****************************************************************************/
-uint16 fw_upload_GetDataLen(uint8 *buf) {
-  return (buf[8] | (buf[9] << 8));
-}
+uint16 fw_upload_GetDataLen(uint8* buf) { return (buf[8] | (buf[9] << 8)); }
 
 /******************************************************************************
  *
@@ -164,6 +174,7 @@ int32 fw_upload_ComReadChar(int32 mchar_fd) {
   if (read(mchar_fd, &iResult, ucNumCharToRead) == ucNumCharToRead) {
     return (iResult & 0xFF);
   } else {
+    VND_LOGV("Read error: %s (%d)", strerror(errno), errno);
     return RW_FAILURE;
   }
 }
@@ -191,11 +202,10 @@ int32 fw_upload_ComReadChar(int32 mchar_fd) {
  *   None.
  *
  *****************************************************************************/
-int32 fw_upload_ComReadChars(int32 mchar_fd, uint8* pBuffer, uint32 uiCount) {
-  if ((uint32)read(mchar_fd, pBuffer, uiCount) == uiCount) {
-    return uiCount;
-  } else {
-    return RW_FAILURE;
+void fw_upload_ComReadChars(int32 mchar_fd, uint8* pBuffer, uint32 uiCount) {
+  if ((uint32)read(mchar_fd, pBuffer, uiCount) != uiCount) {
+    VND_LOGV("Read error: %s (%d)", strerror(errno), errno);
+    return;
   }
 }
 
@@ -221,14 +231,13 @@ int32 fw_upload_ComReadChars(int32 mchar_fd, uint8* pBuffer, uint32 uiCount) {
  *   None.
  *
  *****************************************************************************/
-int8 fw_upload_ComWriteChar(int32 mchar_fd, int8 iChar) {
+void fw_upload_ComWriteChar(int32 mchar_fd, int8 iChar) {
   uint8 ucNumCharToWrite = 1;
 
-  if (write(mchar_fd, &iChar, ucNumCharToWrite) == ucNumCharToWrite) {
-    return RW_SUCCESSFUL;
-  } else {
-    return RW_FAILURE;
+  if (write(mchar_fd, &iChar, ucNumCharToWrite) != ucNumCharToWrite) {
+    VND_LOGE("Write error: %s (%d)", strerror(errno), errno);
   }
+  return;
 }
 
 /******************************************************************************
@@ -254,12 +263,11 @@ int8 fw_upload_ComWriteChar(int32 mchar_fd, int8 iChar) {
  *   None.
  *
  *****************************************************************************/
-int8 fw_upload_ComWriteChars(int32 mchar_fd, uint8* pBuffer, uint32 uiLen) {
-  if ((uint32)write(mchar_fd, pBuffer, uiLen) == uiLen) {
-    return RW_SUCCESSFUL;
-  } else {
-    return RW_FAILURE;
+void fw_upload_ComWriteChars(int32 mchar_fd, uint8* pBuffer, uint32 uiLen) {
+  if ((uint32)write(mchar_fd, pBuffer, uiLen) != uiLen) {
+    VND_LOGE("Write error: %s (%d)", strerror(errno), errno);
   }
+  return;
 }
 
 /******************************************************************************
@@ -282,7 +290,9 @@ int8 fw_upload_ComWriteChars(int32 mchar_fd, uint8* pBuffer, uint32 uiLen) {
  *****************************************************************************/
 int32 fw_upload_ComGetCTS(int32 mchar_fd) {
   int32 status;
-  ioctl(mchar_fd, TIOCMGET, &status);
+  if (ioctl(mchar_fd, TIOCMGET, &status) < 0) {
+    VND_LOGE("ioctl error: %s (%d)", strerror(errno), errno);
+  }
   if (status & TIOCM_CTS) {
     return 0;
   } else {
@@ -311,7 +321,9 @@ int32 fw_upload_ComGetCTS(int32 mchar_fd) {
  *****************************************************************************/
 int32 fw_upload_GetBufferSize(int32 mchar_fd) {
   int32 bytes = 0;
-  ioctl(mchar_fd, FIONREAD, &bytes);
+  if (ioctl(mchar_fd, FIONREAD, &bytes) < 0) {
+    VND_LOGE("ioctl error: %s (%d)", strerror(errno), errno);
+  }
   return bytes;
 }
 
@@ -345,7 +357,7 @@ uint64 fw_upload_GetTime(void) {
     millsectime =
         (((uint64)time.tv_sec) * 1000) + (((uint64)time.tv_nsec) / 1000000);
   } else {
-    VND_LOGE("clock_gettime error: %d", errno);
+    VND_LOGE("clock_gettime error:%s (%d)", strerror(errno), errno);
   }
   return millsectime;
 }

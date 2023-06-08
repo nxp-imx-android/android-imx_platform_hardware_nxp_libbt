@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright 2018-2022 NXP
+ *  Copyright 2018-2023 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,8 +16,18 @@
  *
  ******************************************************************************/
 
-#ifndef _BT_VENDOR_NXP_H
-#define _BT_VENDOR_NXP_H
+/******************************************************************************
+ *
+ *  Filename:      bt_vendor_nxp.h
+ *
+ *  Description:   NXP VHAL related declaration
+ *
+ ******************************************************************************/
+
+#ifndef BT_VENDOR_NXP_H
+#define BT_VENDOR_NXP_H
+
+/*============================== Include Files ===============================*/
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -27,26 +37,13 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+
 #include "bt_vendor_lib.h"
 #include <stdbool.h>
 
-/******************************************************************************
-**  Local type definitions
-******************************************************************************/
-typedef unsigned long long uint64;
-typedef unsigned int uint32;
-typedef unsigned short uint16;
-typedef unsigned char uint8;
-typedef int int32;
-typedef short int16;
-typedef char int8;
-typedef unsigned char BOOLEAN;
+/*================================== Macros ==================================*/
 
-/******************************************************************************
-**  Constants & Macros
-******************************************************************************/
-
-#define BT_HAL_VERSION "009.015"
+#define BT_HAL_VERSION "009.016"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -59,6 +56,7 @@ typedef unsigned char BOOLEAN;
 #define MAX_PATH_LEN 512
 #define MAX_DEVICE_LEN 32
 #define MAX_FILE_LEN 128
+#define MAX_CONF_PARA_LEN 36
 #define DOWNLOAD_SUCCESS 0x0
 #define OPEN_SERIAL_PORT_OR_FILE_ERROR 0x1
 #define FEEK_SEEK_ERROR 0x2
@@ -93,9 +91,17 @@ typedef unsigned char BOOLEAN;
 #define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"
 #endif
 
-/******************************************************************************
-**  Structure
-******************************************************************************/
+/*================================== Typedefs=================================*/
+
+typedef unsigned long long uint64;
+typedef unsigned int uint32;
+typedef unsigned short uint16;
+typedef unsigned char uint8;
+typedef int int32;
+typedef short int16;
+typedef char int8;
+typedef unsigned char BOOLEAN;
+
 enum { IR_TRIGGER_NONE, IR_TRIGGER_RFKILL, IR_TRIGGER_GPIO };
 enum { IR_MODE_NONE, IR_MODE_OOB_VSC, IR_MODE_INBAND_VSC };
 enum { wakeup_power_key, wakeup_netflix_key, wakeup_key_num };
@@ -123,15 +129,13 @@ typedef struct {
   unsigned char heartbeat_timer_value;  // 100ms
 } wakeup_local_param_config_t;
 
-/***********************************************************
- *  Externs
- ***********************************************************
- */
+/*================================ Global Vars================================*/
+
 extern unsigned char* bdaddr;
 extern int write_bdaddrss;
 extern uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE];
 extern const bt_vendor_callbacks_t* vnd_cb;
-extern char pFilename_cal_data[];
+extern char pFilename_cal_data[MAX_PATH_LEN];
 extern int8_t ble_1m_power;
 extern int8_t ble_2m_power;
 extern int8_t bt_max_power_sel;
@@ -141,7 +145,7 @@ extern uint8_t independent_reset_mode;
 extern uint8_t independent_reset_gpio_pin;
 extern bool enable_sco_config;
 extern bool use_controller_addr;
-extern char pFilename_fw_init_config_bin[];
+extern char pFilename_fw_init_config_bin[MAX_PATH_LEN];
 extern bool enable_heartbeat_config;
 extern bool enable_pdn_recovery;
 extern wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num];
@@ -154,11 +158,12 @@ void wakeup_kill_heartbeat_thread(void);
 #ifdef UART_DOWNLOAD_FW
 extern uint8_t enable_poke_controller;
 #endif
-/*****************************************************************************
-**   Functions Prototype
-*****************************************************************************/
+
+/*============================ Function Prototypes ===========================*/
+
 void hw_config_start(void);
 int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl);
 int get_prop_int32(char* name);
-int set_prop_int32(char* name, int value);
-#endif
+void set_prop_int32(char* name, int value);
+
+#endif  // BT_VENDOR_NXP_H

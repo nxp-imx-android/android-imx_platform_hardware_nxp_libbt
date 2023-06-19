@@ -1,7 +1,7 @@
 /******************************************************************************
  *  Copyright 2012 The Android Open Source Project
  *  Portions copyright (C) 2009-2012 Broadcom Corporation
- *  Portions copyright 2012-2013, 2015, 2018-2022 NXP
+ *  Portions copyright 2012-2013, 2015, 2018-2023 NXP
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,10 +21,15 @@
  *
  *  Filename:      bt_vendor_nxp.c
  *
- *  Description:   NXP vendor specific library implementation
+ *  Description:   NXP vendor specific library exported functions with
+ *                 configuration file processing function
  *
  ******************************************************************************/
+
 #define LOG_TAG "bt-vnd-nxp"
+
+/*============================== Include Files ===============================*/
+
 #include <ctype.h>
 #include <cutils/properties.h>
 #include <errno.h>
@@ -47,13 +52,10 @@
 #endif
 
 #include <linux/gpio.h>
-#include "bt_vendor_nxp.h"
+
 #include "bt_vendor_log.h"
-/******************************************************************************
- **
- ** Constants and Macro's
- **
- ******************************************************************************/
+#include "bt_vendor_nxp.h"
+/*================================== Macros ==================================*/
 /*[NK] @NXP - Driver FIX
   ioctl command to release the read thread before driver close */
 
@@ -75,9 +77,19 @@
 #define CONF_MAX_LINE_LEN 1024
 #define UNUSED(x) (void)(x)
 #define BD_ADDR_LEN 6
-/******************************************************************************
-**  Variables
-******************************************************************************/
+#define BD_STR_ADDR_LEN 17
+
+/*================================== Typedefs ================================*/
+
+typedef int(conf_action_t)(char* p_conf_name, char* p_conf_value, int param);
+
+typedef struct {
+  const char* conf_entry;
+  conf_action_t* p_action;
+  int param;
+} conf_entry_t;
+
+/*================================ Varaibles =================================*/
 int mchar_fd = 0;
 int vhal_trace_level = BT_TRACE_LEVEL_INFO;
 struct termios ti;
@@ -154,18 +166,8 @@ wakeup_scan_param_config_t wakeup_scan_param_config = {.le_scan_type = 0,
                                                        .scan_filter_policy = 0};
 wakeup_local_param_config_t wakup_local_param_config = {.heartbeat_timer_value =
                                                             8};
-/*****************************************************************************
-**
-**   HELPER FUNCTIONS
-**
-*****************************************************************************/
-typedef int(conf_action_t)(char* p_conf_name, char* p_conf_value, int param);
 
-typedef struct {
-  const char* conf_entry;
-  conf_action_t* p_action;
-  int param;
-} conf_entry_t;
+/*============================== Coded Procedures ============================*/
 
 static int set_enable_sco_config(char* p_conf_name, char* p_conf_value,
                                  int param) {
@@ -182,19 +184,20 @@ static int set_use_controller_addr(char* p_conf_name, char* p_conf_value,
   use_controller_addr = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
   return 0;
 }
-
+#define MCHAR_PORT_PROP "ro.boot.bluetooth.mchar_port"
 static int set_mchar_port(char* p_conf_name, char* p_conf_value, int param) {
   int len_p_conf_value = 0;
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_PATH_LEN);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(mchar_port, p_conf_value, len_p_conf_value + 1);
+    property_get(MCHAR_PORT_PROP, mchar_port, p_conf_value);
+    VND_LOGI("the mchar_port is %s", mchar_port);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_PATH_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_PATH_LEN - 1);
   }
   is_uart_port = 1;
   return 0;
@@ -205,13 +208,13 @@ static int set_mbt_port(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_PATH_LEN);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(mbt_port, p_conf_value, len_p_conf_value + 1);
+    strlcpy(mbt_port, p_conf_value, len_p_conf_value + 1);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_PATH_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_PATH_LEN - 1);
   }
   return 0;
 }
@@ -273,13 +276,13 @@ static int set_pFilename_fw_init_config_bin(char* p_conf_name,
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_PATH_LEN);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(pFilename_fw_init_config_bin, p_conf_value, len_p_conf_value + 1);
+    strlcpy(pFilename_fw_init_config_bin, p_conf_value, len_p_conf_value + 1);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_PATH_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_PATH_LEN - 1);
   }
   return 0;
 }
@@ -327,13 +330,13 @@ static int set_charddev_name(char* p_conf_name, char* p_conf_value, int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_DEVICE_LEN);
   if (len_p_conf_value < MAX_DEVICE_LEN) {
-    strncpy(chrdev_name, p_conf_value, len_p_conf_value + 1);
+    strlcpy(chrdev_name, p_conf_value, len_p_conf_value + 1);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_DEVICE_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_DEVICE_LEN - 1);
   }
   return 0;
 }
@@ -346,9 +349,13 @@ static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
   int j = 7;
   int len = 0;
   if (p_conf_value == NULL) return 0;
-  len = strlen(p_conf_value);
-  if (len != 17) return 0;
-  for (i = 0; i < len; i++) {
+  len = strnlen(p_conf_value, BD_STR_ADDR_LEN + 1);
+  if (len != BD_STR_ADDR_LEN) {
+    VND_LOGE("Invalid string length, unable to process");
+    VND_LOGE("Source length: %d and expected length: %d", len, BD_STR_ADDR_LEN);
+    return 0;
+  }
+  for (i = 0; i < BD_STR_ADDR_LEN; i++) {
     if (((i + 1) % 3) == 0 && p_conf_value[i] != ':') return 0;
     if (((i + 1) % 3) != 0 && !isxdigit(p_conf_value[i])) return 0;
     char tmp = p_conf_value[i];
@@ -363,9 +370,8 @@ static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
     else
       return 0;
   }
-  for (i = 0; i < 17; i++) {
+  for (i = 0; i < BD_STR_ADDR_LEN; i = i + 3) {
     write_bd_address[j--] = (p_conf_value[i] << 4) | p_conf_value[i + 1];
-    i = i + 2;
   }
   write_bdaddrss = 1;
   return 0;
@@ -386,13 +392,13 @@ static int set_pFileName_image(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_PATH_LEN);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(pFileName_image, p_conf_value, len_p_conf_value + 1);
+    strlcpy(pFileName_image, p_conf_value, len_p_conf_value + 1);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_PATH_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_PATH_LEN - 1);
   }
   auto_select_fw_name = FALSE;
   return 0;
@@ -404,13 +410,13 @@ static int set_pFileName_helper(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_PATH_LEN);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(pFileName_helper, p_conf_value, len_p_conf_value + 1);
+    strlcpy(pFileName_helper, p_conf_value, len_p_conf_value + 1);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_PATH_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_PATH_LEN - 1);
   }
   download_helper = 1;
   return 0;
@@ -471,13 +477,13 @@ static int set_Filename_cal_data(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
 
-  len_p_conf_value = strlen(p_conf_value);
+  len_p_conf_value = strnlen(p_conf_value, MAX_PATH_LEN);
   if (len_p_conf_value < MAX_PATH_LEN) {
-    strncpy(pFilename_cal_data, p_conf_value, len_p_conf_value + 1);
+    strlcpy(pFilename_cal_data, p_conf_value, len_p_conf_value + 1);
   } else {
     VND_LOGE("String length too long, unable to process");
-    VND_LOGW("Source length: %d and destination length: %d", len_p_conf_value,
-             MAX_PATH_LEN);
+    VND_LOGE("Source length: %d and destination size: %d", len_p_conf_value,
+             MAX_PATH_LEN - 1);
   }
   return 0;
 }
@@ -555,7 +561,8 @@ static int set_wakeup_adv_pattern(char* p_conf_name, char* p_conf_value,
   UNUSED(p_conf_name);
   UNUSED(param);
   if (wakeup_adv_config.length >= NXP_WAKEUP_ADV_PATTERN_LENGTH) {
-    VND_LOGE("%s, wrong length:%d", __func__, wakeup_adv_config.length);
+    VND_LOGE("%s, invalid length:%d max limit %d", __func__,
+             wakeup_adv_config.length, NXP_WAKEUP_ADV_PATTERN_LENGTH - 1);
     return -1;
   }
   wakeup_adv_config.adv_pattern[wakeup_adv_config.length] =
@@ -709,7 +716,8 @@ static void vnd_load_conf(const char* p_path) {
       p_entry = (conf_entry_t*)conf_table;
 
       while (p_entry->conf_entry != NULL) {
-        if (strcmp(p_entry->conf_entry, (const char*)p_name) == 0) {
+        if (strncmp(p_entry->conf_entry, (const char*)p_name,
+                    MAX_CONF_PARA_LEN) == 0) {
           p_entry->p_action(p_name, p_value, p_entry->param);
           break;
         }
@@ -720,7 +728,8 @@ static void vnd_load_conf(const char* p_path) {
 
     fclose(p_file);
   } else {
-    VND_LOGW("vnd_load_conf file >%s< not found", p_path);
+    VND_LOGE("File open error at %s", p_path);
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
   }
 }
 
@@ -750,6 +759,7 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
     r = read(fd, buf, 1);
     if (r <= 0) {
       VND_LOGV("read hci event 0x04 failed, retry");
+      VND_LOGV("Error %s (%d)", strerror(errno), errno);
       usleep(retry_delay_ms * 1000);
       total_duration += retry_delay_ms;
       continue;
@@ -769,6 +779,7 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
     r = read(fd, buf + count, 3 - count);
     if (r <= 0) {
       VND_LOGE("read hci event code and len failed");
+      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
       return -1;
     }
     count += r;
@@ -787,6 +798,7 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
     r = read(fd, buf + count, remain - (count - 3));
     if (r <= 0) {
       VND_LOGE("read hci event para failed");
+      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
       return -1;
     }
     count += r;
@@ -796,7 +808,7 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
   return count;
 }
 
-int set_prop_int32(char* name, int value) {
+void set_prop_int32(char* name, int value) {
   char init_value[PROPERTY_VALUE_MAX];
   int ret;
 
@@ -804,15 +816,17 @@ int set_prop_int32(char* name, int value) {
   ret = property_set(name, init_value);
   if (ret < 0) {
     VND_LOGE("set_prop_int32 failed: %d", ret);
+  } else {
+    VND_LOGD("set_prop_int32: %s = %d", name, value);
   }
-  return ret;
+  return;
 }
 
 int get_prop_int32(char* name) {
   int ret;
 
   ret = property_get_int32(name, -1);
-  VND_LOGD("get_prop_int32: %d", ret);
+  VND_LOGD("get_prop_int32: %s = %d", name, ret);
   if (ret < 0) {
     return 0;
   }
@@ -937,16 +951,19 @@ static int32 uart_get_speed(struct termios* ti) {
 static int32 uart_set_speed(int32 fd, struct termios* ti, int32 speed) {
   if (cfsetospeed(ti, uart_speed(speed)) < 0) {
     VND_LOGE("Set O speed failed!");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return -1;
   }
 
   if (cfsetispeed(ti, uart_speed(speed)) < 0) {
     VND_LOGE("Set I speed failed!");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return -1;
   }
 
   if (tcsetattr(fd, TCSANOW, ti) < 0) {
     VND_LOGE("Set Attr speed failed!");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return -1;
   }
   VND_LOGD("Baudrate set to %d", speed);
@@ -967,6 +984,7 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
   int32 fd = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd < 0) {
     VND_LOGE("Can't open serial port");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return -1;
   }
 
@@ -974,6 +992,7 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
 
   if (tcgetattr(fd, &ti) < 0) {
     VND_LOGE("Can't get port settings");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     close(fd);
     return -1;
   }
@@ -1001,6 +1020,7 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
 
   if (tcsetattr(fd, TCSANOW, &ti) < 0) {
     VND_LOGE("Can't set port settings");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     close(fd);
     return -1;
   }
@@ -1011,7 +1031,8 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
   }
   /* Set actual baudrate */
   if (uart_set_speed(fd, &ti, dwBaudRate) < 0) {
-    VND_LOGD("Can't set baud rate");
+    VND_LOGE("Can't set baud rate");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     close(fd);
     return -1;
   }
@@ -1040,6 +1061,7 @@ static int uart_init_open(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
         return -1;
       } else {
         VND_LOGW("open uart port %s failed fd: %d, retrying", dev, fd);
+        VND_LOGW("Error: %s (%d)", strerror(errno), errno);
         usleep(50 * 1000);
         continue;
       }
@@ -1098,6 +1120,10 @@ static int detect_and_download_fw() {
       /* close and open the port and set baud rate to baudrate_dl_image */
       close(mchar_fd);
       mchar_fd = uart_init_open(mchar_port, 3000000, 1);
+      if (mchar_fd < 0) {
+        download_ret = 1;
+        goto done;
+      }
       usleep(20000);
       tcflush(mchar_fd, TCIOFLUSH);
     }
@@ -1169,6 +1195,7 @@ static int config_uart() {
     VND_LOGD("Write HCI Reset command");
     if (write(mchar_fd, reset_cmd, clen) != clen) {
       VND_LOGE("Failed to write reset command");
+      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
       return -1;
     }
 
@@ -1187,12 +1214,14 @@ static int config_uart() {
       VND_LOGD("set fw baudrate as 3000000");
       if (write(mchar_fd, set_speed_cmd_3m, clen) != clen) {
         VND_LOGE("Failed to write set baud rate command");
+        VND_LOGE("Error: %s (%d)", strerror(errno), errno);
         return -1;
       }
     } else if (baudrate_bt == 115200) {
       VND_LOGD("set fw baudrate as 115200");
       if (write(mchar_fd, set_speed_cmd, clen) != clen) {
         VND_LOGE("Failed to write set baud rate command");
+        VND_LOGE("Error: %s (%d)", strerror(errno), errno);
         return -1;
       }
     }
@@ -1217,6 +1246,7 @@ static int config_uart() {
     ti.c_cflag |= CRTSCTS;
     if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
       VND_LOGE("Set Flow Control failed!");
+      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
       return -1;
     }
     tcflush(mchar_fd, TCIOFLUSH);
@@ -1228,6 +1258,9 @@ static int config_uart() {
     /* Close and open the port as setting baudrate to baudrate_bt */
     close(mchar_fd);
     mchar_fd = uart_init_open(mchar_port, baudrate_bt, 1);
+    if (mchar_fd < 0) {
+      return -1;
+    }
     usleep(20000);
     tcflush(mchar_fd, TCIOFLUSH);
   }
@@ -1236,13 +1269,14 @@ static int config_uart() {
   return 0;
 }
 static bool bt_vnd_is_rfkill_disabled(void) {
-  char value[PROPERTY_VALUE_MAX];
-
+  char value[PROPERTY_VALUE_MAX] = {'\0'};
+  bool ret = FALSE;
   property_get("ro.rfkilldisabled", value, "0");
-  if (strcmp(value, "1") == 0) {
-    return true;
+  VND_LOGD("ro.rfkilldisabled %c", value[0]);
+  if ((int)value[0] == '1') {
+    ret = TRUE;
   }
-  return false;
+  return ret;
 }
 
 static int bt_vnd_init_rfkill() {
@@ -1273,7 +1307,7 @@ static int bt_vnd_init_rfkill() {
   }
 
   if (rfkill_id == -1) {
-    VND_LOGE("bluetooth rfkill not found");
+    VND_LOGE("Bluetooth rfkill not found");
     return -1;
   } else {
     asprintf(&rfkill_state_path, "/sys/class/rfkill/rfkill%d/state", rfkill_id);
@@ -1329,7 +1363,7 @@ void bt_vnd_gpio_configuration(int value) {
   /* Open device: gpiochip0 for GPIO bank A */
   fd = open(chrdev_name, 0);
   if (fd == -1) {
-    VND_LOGW("Failed to open %s %s", chrdev_name, strerror(errno));
+    VND_LOGW("Failed to open %s %s(%d)", chrdev_name, strerror(errno), errno);
     return;
   }
   /* Request GPIO Direction line as out */
@@ -1340,7 +1374,7 @@ void bt_vnd_gpio_configuration(int value) {
 
   if (ret == -1) {
     VND_LOGE("%s Failed to issue GET LINEHANDLE IOCTL(%d)", strerror(errno),
-             ret);
+             errno);
     close(fd);
     return;
   }
@@ -1353,7 +1387,7 @@ void bt_vnd_gpio_configuration(int value) {
   ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
   if (ret == -1) {
     close(req.fd);
-    VND_LOGE("%s failed to issue GET LINEHANDLE", strerror(errno));
+    VND_LOGE("%s failed to issue GET LINEHANDLE(%d)", strerror(errno), errno);
     return;
   }
   VND_LOGD("Current Value of line=: %d", data.values[0]);
@@ -1367,6 +1401,9 @@ void bt_vnd_gpio_configuration(int value) {
     return;
   }
   ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
+  if (ret < 0) {
+    VND_LOGE("ioctl error: %s (%d)", strerror(errno), errno);
+  }
   VND_LOGD("Updated Value of Line:= %d", data.values[0]);
 
   /*  release line */
@@ -1409,6 +1446,7 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
     tcflush(mchar_fd, TCIOFLUSH);
     if (write(mchar_fd, inband_reset_cmd, cmd_resp_len) != cmd_resp_len) {
       VND_LOGE("Failed to write in-band reset command ");
+      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
       return -1;
     } else {
       VND_LOGD("start read hci event");
@@ -1530,9 +1568,9 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       if (enable_pdn_recovery == TRUE) {
         int init_attempted = get_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED);
         if (init_attempted >= PDN_RECOVERY_THRESHOLD) {
-          ALOGE("%s: %s(%d) > %d, Triggering PDn recovery.\n", __FUNCTION__,
-                PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted,
-                PDN_RECOVERY_THRESHOLD);
+          VND_LOGE("%s: %s(%d) > %d, Triggering PDn recovery.\n", __FUNCTION__,
+                   PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted,
+                   PDN_RECOVERY_THRESHOLD);
           set_prop_int32(PROP_VENDOR_TRIGGER_PDN, 1);
           set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, 0);
         } else {
@@ -1553,9 +1591,15 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           VND_LOGD("enable_download_fw %d", enable_download_fw);
           VND_LOGD("uart_sleep_after_dl %d", uart_sleep_after_dl);
           VND_LOGD("independent_reset_mode %d", independent_reset_mode);
+          VND_LOGD("send_oob_ir_trigger %d", send_oob_ir_trigger);
+          VND_LOGD("independent_reset_gpio_pin %d", independent_reset_gpio_pin);
+          VND_LOGD("ir_host_gpio_pin %d", ir_host_gpio_pin);
+          VND_LOGD("chrdev_name %s", chrdev_name);
           VND_LOGD("send_boot_sleep_trigger %d", send_boot_sleep_trigger);
           VND_LOGD("enable_pdn_recovery %d", enable_pdn_recovery);
           VND_LOGD("enable_lpm %d", enable_lpm);
+          VND_LOGD("use_controller_addr %d", use_controller_addr);
+          VND_LOGD("bt_max_power_sel %d", bt_max_power_sel);
         }
 #endif
       }
@@ -1618,6 +1662,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           ti.c_cflag |= CRTSCTS;
           if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
             VND_LOGE("Set Flow Control failed!");
+            VND_LOGE("Error: %s (%d)", strerror(errno), errno);
             return -1;
           }
           tcflush(mchar_fd, TCIOFLUSH);
@@ -1626,6 +1671,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
         ti.c_cflag |= CRTSCTS;
         if (tcsetattr(mchar_fd, TCSANOW, &ti) < 0) {
           VND_LOGE("Set Flow Control failed!");
+          VND_LOGE("Error: %s (%d)", strerror(errno), errno);
           return -1;
         }
         tcflush(mchar_fd, TCIOFLUSH);
@@ -1645,6 +1691,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
 
             while (count-- > 0) {
               if ((fd = fopen("/sys/class/net/wlan0", "r")) != NULL) {
+                VND_LOGD("Error: %s (%d)", strerror(errno), errno);
                 fclose(fd);
                 break;
               }
@@ -1669,6 +1716,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
             } else {
               VND_LOGW("open USB/SD port %s failed fd: %d, retrying", mbt_port,
                        mchar_fd);
+              VND_LOGW("Error: %s (%d)", strerror(errno), errno);
               sleep(1);
               continue;
             }
@@ -1698,12 +1746,15 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           mchar_fd = 0;
         }
       } else {
-        ioctl(mchar_fd, MBTCHAR_IOCTL_RELEASE, &local_st);
+        if (ioctl(mchar_fd, MBTCHAR_IOCTL_RELEASE, &local_st) < 0) {
+          VND_LOGE("ioctl error: %s (%d)", strerror(errno), errno);
+        }
         /* Give it sometime before we close the mbtchar */
         usleep(1000);
         if (mchar_fd) {
           if (close(mchar_fd) < 0) {
             VND_LOGE("close serial port failed!");
+            VND_LOGE("Error: %s (%d)", strerror(errno), errno);
             ret = -1;
           }
         }
@@ -1712,7 +1763,7 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
     case BT_VND_OP_GET_LPM_IDLE_TIMEOUT: {
       uint32_t* timeout_ms = (uint32_t*)param;
       *timeout_ms = enable_lpm ? lpm_timeout_ms : 0;
-      VND_LOGI("LPM timeout = %d",*timeout_ms);
+      VND_LOGI("LPM timeout = %d", *timeout_ms);
     } break;
     case BT_VND_OP_LPM_SET_MODE:
       if (enable_lpm == TRUE) {
@@ -1735,13 +1786,19 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       break;
     case BT_VND_OP_LPM_WAKE_SET_STATE:
       if (lpm_configured == TRUE) {
+        int status;
         uint8_t* wake_state = (uint8_t*)param;
         if (*wake_state == BT_VND_LPM_WAKE_ASSERT) {
           VND_LOGI("LPM: Wakeup BT Device");
-          VND_LOGI("Assert Status:%d\n", ioctl(mchar_fd, TIOCCBRK));
+          status = ioctl(mchar_fd, TIOCCBRK);
+          VND_LOGI("Assert Status:%d\n", status);
         } else {
           VND_LOGI("LPM: Allow BT Device to sleep");
-          VND_LOGI("Deassert Status:%d\n", ioctl(mchar_fd, TIOCSBRK));
+          status = ioctl(mchar_fd, TIOCSBRK);
+          VND_LOGI("Deassert Status:%d\n", status);
+        }
+        if (status < 0) {
+          VND_LOGE("LPM toggle Error: %s (%d)", strerror(errno), errno);
         }
       }
       break;
@@ -1764,5 +1821,8 @@ static void bt_vnd_cleanup(void) {
 
 /** Entry point of DLib */
 const bt_vendor_interface_t BLUETOOTH_VENDOR_LIB_INTERFACE = {
-    sizeof(bt_vendor_interface_t), bt_vnd_init, bt_vnd_op, bt_vnd_cleanup,
+    sizeof(bt_vendor_interface_t),
+    bt_vnd_init,
+    bt_vnd_op,
+    bt_vnd_cleanup,
 };

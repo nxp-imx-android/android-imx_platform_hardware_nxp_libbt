@@ -1,6 +1,11 @@
 # Change Log
 All notable changes in Bluetooth Vendor Hardware Abstraction Layer(BT VHAL) will be documented in this file.
 
+## [009.016] - 2023-March-24
+
+### Fixed
+- Fixed static code analysis errors
+
 ## [009.015] - 2023-March-24
 
 ### Added

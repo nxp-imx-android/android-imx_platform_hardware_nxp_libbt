@@ -16,24 +16,30 @@
  *
  ******************************************************************************/
 
-#ifndef _FW_LOADER_V2_H
-#define _FW_LOADER_V2_H
-/*===================== Include Files ============================================*/
+/******************************************************************************
+ *
+ *  Filename:      fw_loader_uart_v2.h
+ *
+ *  Description:   Firmware loader vesion 2 function declarations
+ *
+ ******************************************************************************/
+
+#ifndef FW_LOADER_V2_H
+#define FW_LOADER_V2_H
+/*============================== Include Files ===============================*/
 #include "bt_vendor_nxp.h"
 
-/*==================== Typedefs =================================================*/
+/*================================== Macros ==================================*/
 
+/*================================== Typedefs=================================*/
 
-/*===================== Macros ===================================================*/
-
+/*================================ Global Vars================================*/
 extern int mchar_fd;
 
-/*===================== Global Vars ==============================================*/
-
-/*==================== Function Prototypes ======================================*/
+/*============================ Function Prototypes ===========================*/
 
 void init_crc8();
 BOOLEAN bt_vnd_mrvl_check_fw_status_v2();
-int bt_vnd_mrvl_download_fw_v2(int8 *pPortName, int32 iBaudRate, int8 *pFileName);
-#endif  // _FW_LOADER_H
-
+int bt_vnd_mrvl_download_fw_v2(int8* pPortName, int32 iBaudRate,
+                               int8* pFileName);
+#endif  // FW_LOADER_V2_H

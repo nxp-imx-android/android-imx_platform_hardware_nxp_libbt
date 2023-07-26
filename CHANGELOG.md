@@ -1,6 +1,13 @@
 # Change Log
 All notable changes in Bluetooth Vendor Hardware Abstraction Layer(BT VHAL) will be documented in this file.
 
+## [009.017] - 2023-June-13
+
+### Added
+- Updated code to send exit heartbeat mode command to controller on BT off event
+- Added wakeup_enable_uart_low_config parameter to pull controller specific UART lines to low when HEARTBEAT timer is timed out on controller.
+- Updated code in BT off event to avoid unexpected FW condition and data on BT enable event
+
 ## [009.016] - 2023-March-24
 
 ### Fixed

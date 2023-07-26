@@ -29,6 +29,7 @@
 /*============================== Include Files ===============================*/
 
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,11 +60,9 @@
 
 #define HCI_CMD_NXP_WRITE_BD_ADDRESS 0xFC22
 #define HCI_BT_SET_EVENTMASK_OCF 0x0001
-#define HCI_CMD_NXP_RESET 0x0C03
+
 #define HCI_DISABLE_PAGE_SCAN_OCF 0x001a
 #define HCI_READ_LOCAL_BDADDR 0x1009
-#define HCI_COMMAND_COMPLETE_EVT 0x0E
-#define HCI_PACKET_TYPE_EVENT 0x04
 
 #define WRITE_BD_ADDRESS_SIZE 8
 #define HCI_CMD_PREAMBLE_SIZE 3
@@ -79,11 +78,6 @@
    IS_SAME_MEM(src, 0x41, BD_ADDR_LEN) || \
    IS_SAME_MEM(src, 0x88, BD_ADDR_LEN) || IS_SAME_MEM(src, 0x99, BD_ADDR_LEN))
 
-/*1 byte for event code, 1 byte for parameter length (Volume 2, Part E, 5.4.4)
- */
-#define HCI_EVENT_PREAMBLE_SIZE 2
-/*2 bytes for opcode, 1 byte for parameter length (Volume 2, Part E, 5.4.1) */
-#define HCI_COMMAND_PREAMBLE_SIZE 3
 #define WRITE_BD_ADDRESS_SIZE 8
 #define HCI_EVT_CMD_CMPL_LOCAL_BDADDR_ARRAY 6
 #define BD_ADDR_LEN 6
@@ -100,30 +94,16 @@
 #define BT_CONFIG_DATA_SIZE 28
 #define HCI_CMD_NXP_SET_BT_SLEEP_MODE 0xFC23
 #define HCI_CMD_NXP_SET_BT_SLEEP_MODE_SIZE 0x03
-#define STREAM_TO_UINT16(u16, p)                                \
-  do {                                                          \
-    u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); \
-    (p) += 2;                                                   \
-  } while (0)
-
-#define UINT16_TO_STREAM(p, u16)    \
-  do {                              \
-    *(p)++ = (uint8_t)(u16);        \
-    *(p)++ = (uint8_t)((u16) >> 8); \
-  } while (0)
-
-#define UINT8_TO_STREAM(p, u8) \
-  { *(p)++ = (uint8_t)(u8); }
 
 /*Move to next configuration in the sequence*/
 #define hw_config_next() hw_config_seq(NULL)
 
-#define HCI_CMD_NXP_BLE_WAKEUP 0xFD52
 #define HCI_CMD_NXP_SUB_OCF_HEARTBEAT 0x00
 #define HCI_CMD_NXP_SUB_OCF_GPIO_CONFIG 0x01
 #define HCI_CMD_NXP_SUB_OCF_ADV_PATTERN_CONFIG 0x02
 #define HCI_CMD_NXP_SUB_OCF_SCAN_PARAM_CONFIG 0x03
 #define HCI_CMD_NXP_SUB_OCF_LOCAL_PARAM_CONFIG 0x04
+#define HCI_CMD_OTT_SUB_WAKEUP_UART_PULL_DOWN_CONFIG 0x07
 #define HCI_CMD_NXP_SUB_OCF_SIZE 1
 #define HCI_CMD_NXP_GPIO_CONFIG_SIZE 4
 #define HCI_CMD_NXP_ADV_PATTERN_LENGTH_SIZE 1
@@ -156,6 +136,7 @@ static int8 set_wakeup_scan_parameter(void);
 static int8 set_wakeup_adv_pattern(void);
 static int8 set_wakeup_local_parameter(void);
 static int8 set_wakeup_gpio_config(void);
+static int8 set_wakeup_uart_pull_down_config(void);
 static void* send_heartbeat_thread(void* data);
 static void wakeup_event_handler(uint8_t sub_ocf);
 
@@ -186,6 +167,7 @@ static hw_config_fun_ptr hw_config_seq_arr[] = {
     set_wakeup_gpio_config,
     set_wakeup_adv_pattern,
     set_wakeup_local_parameter,
+    set_wakeup_uart_pull_down_config,
     hw_sco_config};
 
 /*Write_Voice_Setting - Use Linear Input coding, uLaw Air coding, 16bit sample
@@ -212,8 +194,16 @@ static uint8_t wake_gpio_config = 0;
 
 /*============================== Coded Procedures ============================*/
 
-#if (BT_TRACE_LEVEL_DEBUG <= VHAL_LOG_LEVEL)
-static char* cmd_to_str(uint16_t cmd) {
+/******************************************************************************
+ **
+ ** Function:      hw_bt_cmd_to_str
+ **
+ ** Description:   Maps Opcode to name string
+ **
+ ** Return Value:  Opcode string if success, "unknown command" otherwise
+ **
+ *****************************************************************************/
+char* hw_bt_cmd_to_str(uint16_t cmd) {
   switch (cmd) {
     case HCI_CMD_NXP_WRITE_PCM_SETTINGS:
       return "write_pcm_settings";
@@ -245,13 +235,47 @@ static char* cmd_to_str(uint16_t cmd) {
       return "ble_wake_config";
     case HCI_CMD_NXP_SET_BT_SLEEP_MODE:
       return "configure_lpm";
+    case HCI_CMD_INBAND_RESET:
+      return "inband_reset";
+    case HCI_CMD_NXP_CHANGE_BAUDRATE:
+      return "change_baudrate";
     default:
       break;
   }
 
   return "unknown command";
 }
-#endif
+/******************************************************************************
+ **
+ ** Function:      hw_bt_send_packet_raw
+ **
+ ** Description:   Sends raw packet to Controller
+                   Note: After sending command packet memory will be freed
+ **
+ ** Return Value:  0 if success, -1 otherwise
+ **
+ *****************************************************************************/
+int8 hw_bt_send_packet_raw(void* packet, uint32_t length) {
+  int8 ret = -1;
+  uint8_t* ptr;
+  if (packet) {
+    if (write(mchar_fd, packet, length)) {
+      ret = 0;
+      VND_LOGV("PKT Dump");
+      ptr = (uint8_t*)packet;
+      for (uint8 i = 0; i < length; i++)
+        VND_LOGV("pkt[%d]=%02x", i, (uint8_t)ptr[i]);
+    } else {
+      VND_LOGE("Error while sending packet ");
+      VND_LOGE("Write error: %s (%d)", strerror(errno), errno);
+    }
+    free(packet);
+  } else {
+    VND_LOGE("%s Error:Sending Invalid Packet", __func__);
+  }
+  return ret;
+}
+
 /******************************************************************************
  **
  ** Function:      hw_bt_send_packet
@@ -266,7 +290,8 @@ int8 hw_bt_send_packet(HC_BT_HDR* packet, uint16_t opcode,
   int8 ret = -1;
   if (packet) {
     if (vnd_cb->xmit_cb(opcode, packet, reply_handler)) {
-      VND_LOGD("Sending hci command 0x%04hX (%s)", opcode, cmd_to_str(opcode));
+      VND_LOGD("Sending hci command 0x%04hX (%s)", opcode,
+               hw_bt_cmd_to_str(opcode));
       ret = 0;
     } else {
       VND_LOGE("Error while sending packet %04x", opcode);
@@ -387,7 +412,7 @@ static void hw_sco_config_cb(void* p_mem) {
   } /* switch (evt_params.cmd) */
 
   if (p_buf) {
-    VND_LOGD("Sending hci command 0x%04hX (%s)", cmd, cmd_to_str(cmd));
+    VND_LOGD("Sending hci command 0x%04hX (%s)", cmd, hw_bt_cmd_to_str(cmd));
     if (vnd_cb->xmit_cb(cmd, p_buf, hw_sco_config_cb))
       return;
     else
@@ -421,7 +446,7 @@ static int8 hw_sco_config(void) {
     p_buf = build_cmd_buf(cmd, WRITE_PCM_SETTINGS_SIZE, write_pcm_settings);
 
     if (p_buf) {
-      VND_LOGD("Sending hci command 0x%04hX (%s)", cmd, cmd_to_str(cmd));
+      VND_LOGD("Sending hci command 0x%04hX (%s)", cmd, hw_bt_cmd_to_str(cmd));
       if (vnd_cb->xmit_cb(cmd, p_buf, hw_sco_config_cb))
         return 0;
       else
@@ -445,7 +470,7 @@ static int8 hw_sco_config(void) {
 
 static HC_BT_HDR* make_command(uint16_t opcode, size_t parameter_size) {
   HC_BT_HDR* packet = (HC_BT_HDR*)malloc(
-      sizeof(HC_BT_HDR) + HCI_COMMAND_PREAMBLE_SIZE + parameter_size);
+      sizeof(HC_BT_HDR) + HCI_COMMAND_HEADER_SIZE + parameter_size);
   if (!packet) {
     VND_LOGE("%s Failed to allocate buffer", __func__);
     return NULL;
@@ -454,9 +479,39 @@ static HC_BT_HDR* make_command(uint16_t opcode, size_t parameter_size) {
   packet->event = 0;
   packet->offset = 0;
   packet->layer_specific = 0;
-  packet->len = HCI_COMMAND_PREAMBLE_SIZE + parameter_size;
+  packet->len = HCI_COMMAND_HEADER_SIZE + parameter_size;
   UINT16_TO_STREAM(stream, opcode);
   UINT8_TO_STREAM(stream, parameter_size);
+  return packet;
+}
+
+/*******************************************************************************
+**
+** Function        make_command_raw
+**
+** Description     Prepare raw packet using opcode and parameter size
+**
+** Returns         Pointer to base address of HC_BT_HDR structure
+**
+*******************************************************************************/
+
+static uint8_t* make_command_raw(uint16_t opcode, uint8_t parameter_size,
+                                 uint8_t* size) {
+  uint8_t *packet, *ptr;
+  uint8_t pkt_size =
+      HCI_PACKET_TYPE_SIZE + HCI_COMMAND_HEADER_SIZE + parameter_size;
+  packet = (uint8_t*)malloc(pkt_size);
+  if (!packet) {
+    *size = 0;
+    VND_LOGE("%s Failed to allocate buffer", __func__);
+    return NULL;
+  }
+  memset(packet, 0, pkt_size);
+  ptr = packet;
+  UINT8_TO_STREAM(ptr, HCI_PACKET_COMMAND);
+  UINT16_TO_STREAM(ptr, opcode);
+  UINT8_TO_STREAM(ptr, parameter_size);
+  *size = pkt_size;
   return packet;
 }
 
@@ -478,16 +533,16 @@ static void hw_config_process_packet(void* packet) {
     stream = ((HC_BT_HDR*)packet)->data;
     event = ((HC_BT_HDR*)packet)->event;
     len = ((HC_BT_HDR*)packet)->len;
-    opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1; /*Skip num packets.*/
+    opcode_offset = HCI_EVENT_HEADER_SIZE + HCI_PACKET_TYPE_SIZE;
     VND_LOGD("Packet length %d", len);
     /*Minimum length of command event should be 6 bytes*/
-    if ((event == HCI_PACKET_TYPE_EVENT) && (len >= 6)) {
+    if ((event == HCI_PACKET_EVENT) && (len >= 6)) {
       event_code = stream[0];
       opcode = stream[opcode_offset] | (stream[opcode_offset + 1] << 8);
-      if (event_code == HCI_COMMAND_COMPLETE_EVT) {
+      if (event_code == HCI_EVENT_COMMAND_COMPLETE) {
         status = stream[opcode_offset + 2];
         VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x",
-                 opcode, cmd_to_str(opcode), status);
+                 opcode, hw_bt_cmd_to_str(opcode), status);
         switch (opcode) {
           case HCI_CMD_NXP_RESET:
             if (status == 0) {
@@ -713,6 +768,22 @@ static int8 hw_bt_send_reset(void) {
   return hw_bt_send_packet(packet, opcode, hw_config_seq);
 }
 
+/*******************************************************************************
+**
+** Function        hw_bt_send_hci_cmd_raw
+**
+** Description     Send HCI command with opcode to controller
+**
+** Returns         0 if success, -1 otherwise
+**
+*******************************************************************************/
+int8 hw_bt_send_hci_cmd_raw(uint16_t opcode) {
+  uint8_t length;
+  VND_LOGD("Sending hci command 0x%04hX (%s)", opcode,
+           hw_bt_cmd_to_str(opcode));
+  return hw_bt_send_packet_raw(make_command_raw(opcode, 0, &length), length);
+}
+
 /******************************************************************************
  **
  ** Function         hw_bt_load_cal_file
@@ -780,7 +851,7 @@ static int8 hw_bt_cal_data_load(void) {
   opcode = HCI_CMD_NXP_LOAD_CONFIG_DATA;
   packet = make_command(opcode, HCI_CMD_NXP_LOAD_CONFIG_DATA_SIZE);
   if (packet) {
-    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream = &packet->data[HCI_COMMAND_HEADER_SIZE];
     stream[0] = 0x00;
     stream[1] = 0x00;
     stream[2] = 0x00; /* Ignore checksum */
@@ -811,7 +882,7 @@ static int8 hw_ble_send_power_level_cmd(uint8_t phy_level, int8_t power_level) {
   opcode = HCI_CMD_NXP_CUSTOM_OPCODE;
   packet = make_command(opcode, HCI_CMD_NXP_BLE_TX_POWER_DATA_SIZE);
   if (packet) {
-    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream = &packet->data[HCI_COMMAND_HEADER_SIZE];
     stream[0] = HCI_CMD_NXP_SUB_ID_BLE_TX_POWER;
     stream[1] = phy_level;
     stream[2] = power_level;
@@ -820,6 +891,32 @@ static int8 hw_ble_send_power_level_cmd(uint8_t phy_level, int8_t power_level) {
   return ret;
 }
 
+/******************************************************************************
+ **
+ ** Function:      hw_send_change_baudrate_raw
+ **
+ ** Description:   Send change baud rate command.
+ **
+ ** Return Value: 0 if success, -1 otherwise
+ **
+ *****************************************************************************/
+int8 hw_send_change_baudrate_raw(uint32_t baudrate) {
+  uint16_t opcode;
+  uint8_t* packet;
+  uint8_t* stream;
+  int8 ret = -1;
+  uint8_t length;
+  opcode = HCI_CMD_NXP_CHANGE_BAUDRATE;
+  packet = make_command_raw(opcode, 4, &length);
+  if (packet) {
+    stream = &packet[HCI_COMMAND_HEADER_SIZE + HCI_PACKET_TYPE_SIZE];
+    UINT32_TO_STREAM(stream, baudrate);
+    VND_LOGD("Sending hci command 0x%04hX (%s)", opcode,
+             hw_bt_cmd_to_str(opcode));
+    ret = hw_bt_send_packet_raw(packet, length);
+  }
+  return ret;
+}
 /******************************************************************************
  **
  ** Function:      hw_ble_set_power_level
@@ -860,7 +957,7 @@ static int8 hw_bt_enable_max_power_level_cmd(void) {
     opcode = HCI_CMD_NXP_WRITE_BT_TX_POWER;
     packet = make_command(opcode, HCI_CMD_NXP_BT_TX_POWER_DATA_SIZE);
     if (packet) {
-      stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+      stream = &packet->data[HCI_COMMAND_HEADER_SIZE];
       stream[0] = bt_max_power_sel;
       ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
     }
@@ -887,7 +984,7 @@ static int8 hw_bt_enable_independent_reset(void) {
     opcode = HCI_CMD_NXP_INDEPENDENT_RESET_SETTING;
     packet = make_command(opcode, HCI_CMD_NXP_INDEPENDENT_RESET_SETTING_SIZE);
     if (packet) {
-      stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+      stream = &packet->data[HCI_COMMAND_HEADER_SIZE];
       stream[0] = independent_reset_mode;
       if (independent_reset_mode == IR_MODE_OOB_VSC) {
         stream[1] = independent_reset_gpio_pin;
@@ -917,7 +1014,7 @@ int8 hw_bt_configure_lpm(uint8 sleep_mode) {
   opcode = HCI_CMD_NXP_SET_BT_SLEEP_MODE;
   packet = make_command(opcode, HCI_CMD_NXP_SET_BT_SLEEP_MODE_SIZE);
   if (packet) {
-    stream = &packet->data[HCI_COMMAND_PREAMBLE_SIZE];
+    stream = &packet->data[HCI_COMMAND_HEADER_SIZE];
     stream[0] = sleep_mode;
     stream[1] = 0;
     stream[2] = 0;
@@ -975,6 +1072,57 @@ static void* send_heartbeat_thread(void* data) {
   return NULL;
 }
 
+/*******************************************************************************
+**
+** Function         hw_bt_send_wakeup_disable_raw
+**
+** Description      Disable BLE wakeup
+**
+** Returns          None
+**
+*******************************************************************************/
+int8 hw_bt_send_wakeup_disable_raw(void) {
+  uint16_t opcode;
+  int ret = -1;
+  uint8_t* stream;
+  uint8_t length;
+  if (enable_heartbeat_config == TRUE) {
+    uint8_t* packet;
+    opcode = HCI_CMD_NXP_BLE_WAKEUP;
+    packet = make_command_raw(opcode, HCI_CMD_NXP_SUB_OCF_SIZE, &length);
+    if (packet) {
+      stream = &packet[HCI_COMMAND_HEADER_SIZE + HCI_PACKET_TYPE_SIZE];
+      stream[0] = HCI_CMD_OTT_SUB_WAKEUP_EXIT_HEARTBEATS;
+      ret = hw_bt_send_packet_raw(packet, length);
+    }
+  }
+  return ret;
+}
+/*******************************************************************************
+**
+** Function         set_wakeup_local_parameter
+**
+** Description      Configure controller to pull controller specific UART lines
+*                   to low when HEARTBEAT timer is timmed out on controller
+**
+** Returns          None
+**
+*******************************************************************************/
+static int8 set_wakeup_uart_pull_down_config(void) {
+  uint16_t opcode;
+  int ret = -1;
+  if (enable_heartbeat_config == TRUE &&
+      wakeup_enable_uart_low_config == TRUE) {
+    HC_BT_HDR* packet;
+    opcode = HCI_CMD_NXP_BLE_WAKEUP;
+    packet = make_command(opcode, HCI_CMD_NXP_SUB_OCF_SIZE);
+    if (packet) {
+      packet->data[3] = HCI_CMD_OTT_SUB_WAKEUP_UART_PULL_DOWN_CONFIG;
+      ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
+    }
+  }
+  return ret;
+}
 /*******************************************************************************
 **
 ** Function         set_wakeup_gpio_config

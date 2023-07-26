@@ -43,20 +43,15 @@
 
 /*================================== Macros ==================================*/
 
-#define BT_HAL_VERSION "009.016"
+#define BT_HAL_VERSION "009.018"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
 #define RW_FAILURE (~RW_SUCCESSFUL)
-#define BIT(x) (0x1 << x)
 
 #define TRUE 1
 #define FALSE 0
-#define WRITE_BD_ADDRESS_SIZE 8
-#define MAX_PATH_LEN 512
-#define MAX_DEVICE_LEN 32
-#define MAX_FILE_LEN 128
-#define MAX_CONF_PARA_LEN 36
+
 #define DOWNLOAD_SUCCESS 0x0
 #define OPEN_SERIAL_PORT_OR_FILE_ERROR 0x1
 #define FEEK_SEEK_ERROR 0x2
@@ -74,9 +69,30 @@
 
 #define BLE_SET_1M_POWER 0x01
 #define BLE_SET_2M_POWER 0x02
-
 #define BT_SET_SLEEP_MODE 0x02
 #define BT_SET_FULL_POWER_MODE 0x03
+
+#define HCI_CMD_INBAND_RESET 0xFCFC
+#define HCI_CMD_NXP_RESET 0x0C03
+#define HCI_CMD_NXP_CHANGE_BAUDRATE 0xFC09
+#define HCI_CMD_NXP_BLE_WAKEUP 0xFD52
+#define HCI_CMD_OTT_SUB_WAKEUP_EXIT_HEARTBEATS 0x08
+
+#define WRITE_BD_ADDRESS_SIZE 8
+#define MAX_PATH_LEN 512
+#define MAX_DEVICE_LEN 32
+#define MAX_FILE_LEN 128
+
+#define HCI_EVENT_PAYLOAD_SIZE 255
+#define MAX_CONF_PARA_LEN 36
+
+/* BLUETOOTH CORE SPECIFICATION Version 5.4*/
+/*(Volume 4, Part A, 2) | 1 byte HCI packet type*/
+#define HCI_PACKET_TYPE_SIZE 1
+/*(Volume 4,Part E, 5.4.4) 1 byte Event Code, 1 byte Parameter Total Length */
+#define HCI_EVENT_HEADER_SIZE 2
+/*(Volume 4, Part E, 5.4.1) | 2 bytes Opcode, 1 byte Parameter Total Length */
+#define HCI_COMMAND_HEADER_SIZE 3
 
 #define NXP_WAKEUP_ADV_PATTERN_LENGTH 16  // company id + vendor information
 #define PROP_BLUETOOTH_INIT_ATTEMPTED "bluetooth.nxp.init_attempted"
@@ -90,7 +106,37 @@
 #ifndef VENDOR_LIB_CONF_FILE
 #define VENDOR_LIB_CONF_FILE "/vendor/etc/bluetooth/bt_vendor.conf"
 #endif
+#define HCI_PACKET_COMMAND 0x01
+#define HCI_PACKET_EVENT 0x04
+#define HCI_EVENT_COMMAND_COMPLETE 0x0E
+#define HCI_EVENT_HARDWARE_ERROR 0x10
 
+#define HCI_EVT_PLYD_OPCODE_IDX 1
+#define HCI_EVT_PLYD_STATUS_IDX 3
+#define HCI_EVT_PLYD_SUBCODE_IDX 4
+
+#define STREAM_TO_UINT16(u16, p)                                \
+  do {                                                          \
+    u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); \
+    (p) += 2;                                                   \
+  } while (0)
+
+#define UINT32_TO_STREAM(p, u32)     \
+  do {                               \
+    *(p)++ = (uint8_t)(u32);         \
+    *(p)++ = (uint8_t)((u32) >> 8);  \
+    *(p)++ = (uint8_t)((u32) >> 16); \
+    *(p)++ = (uint8_t)((u32) >> 24); \
+  } while (0)
+
+#define UINT16_TO_STREAM(p, u16)    \
+  do {                              \
+    *(p)++ = (uint8_t)(u16);        \
+    *(p)++ = (uint8_t)((u16) >> 8); \
+  } while (0)
+
+#define UINT8_TO_STREAM(p, u8) \
+  { *(p)++ = (uint8_t)(u8); }
 /*================================== Typedefs=================================*/
 
 typedef unsigned long long uint64;
@@ -129,6 +175,16 @@ typedef struct {
   unsigned char heartbeat_timer_value;  // 100ms
 } wakeup_local_param_config_t;
 
+typedef union {
+  uint8_t raw_data[HCI_EVENT_PAYLOAD_SIZE + HCI_EVENT_HEADER_SIZE +
+                   HCI_PACKET_TYPE_SIZE];
+  struct info {
+    uint8_t packet_type;
+    uint8_t event_type;
+    uint8_t para_len;
+    uint8_t payload[];
+  } info;
+} hci_event;
 /*================================ Global Vars================================*/
 
 extern unsigned char* bdaddr;
@@ -153,6 +209,8 @@ extern wakeup_adv_pattern_config_t wakeup_adv_config;
 extern wakeup_scan_param_config_t wakeup_scan_param_config;
 extern wakeup_local_param_config_t wakup_local_param_config;
 extern bool lpm_configured;
+extern int mchar_fd;
+extern bool wakeup_enable_uart_low_config;
 int8 hw_bt_configure_lpm(uint8 sleep_mode);
 void wakeup_kill_heartbeat_thread(void);
 #ifdef UART_DOWNLOAD_FW
@@ -165,5 +223,8 @@ void hw_config_start(void);
 int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl);
 int get_prop_int32(char* name);
 void set_prop_int32(char* name, int value);
-
+int8 hw_bt_send_wakeup_disable_raw(void);
+int8 hw_bt_send_hci_cmd_raw(uint16_t opcode);
+int8 hw_send_change_baudrate_raw(uint32_t baudrate);
+char* hw_bt_cmd_to_str(uint16_t cmd);
 #endif  // BT_VENDOR_NXP_H

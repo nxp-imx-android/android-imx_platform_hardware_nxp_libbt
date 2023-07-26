@@ -19,7 +19,7 @@ ifneq ($(BOARD_HAVE_BLUETOOTH_NXP),)
 
 LOCAL_PATH := $(call my-dir)
 
-BOARD_UART_DOWNLOAD_FW := false
+BOARD_UART_DOWNLOAD_FW := true
 # v2 is for 8887-FP101, and v3 is for other chips.
 BOARD_UART_FW_LOADER_VERSION = v3
 

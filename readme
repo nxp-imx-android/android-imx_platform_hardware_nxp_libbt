@@ -205,6 +205,11 @@ Below parameters are for fw download, if not use fw download by libbt, don't set
 	wakeup_local_heartbeat_timer_value : the time interval for HAL to periodically send a specific VSC, called heartbeat command, to firmware, to notify that host is still in the wake state, unit is 100ms
 		default value : 8
 
+	wakeup_enable_uart_low_config: Configure controller to pull controller specific UART lines to low when HEARTBEAT timer is timed out on controller.
+				Supported Values:
+				wakeup_enable_uart_low_config = 0 (disable, Default)
+				wakeup_enable_uart_low_config = 1 (enable)
+
        Below parameters are not necessary to configure in conf file when download fw by libbt.
 
 	baudrate_dl_helper: baudrate used when download helper. The default value is 115200 in libbt, only need to configure it if choose other baudrate. 

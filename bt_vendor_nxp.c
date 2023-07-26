@@ -55,6 +55,7 @@
 
 #include "bt_vendor_log.h"
 #include "bt_vendor_nxp.h"
+#include "fw_loader_io.h"
 /*================================== Macros ==================================*/
 /*[NK] @NXP - Driver FIX
   ioctl command to release the read thread before driver close */
@@ -68,7 +69,7 @@
 #define POLL_DRIVER_DURATION_US (100000)
 #define POLL_DRIVER_MAX_TIME_MS (20000)
 #define POLL_CONFIG_UART_MS (10)
-#define POLL_INBAND_COMMAND_MS (1)
+#define POLL_RETRY_TIMEOUT_MS (1)
 #define POLL_MAX_TIMOUT_MS (1000)
 
 #define CONF_COMMENT '#'
@@ -88,6 +89,9 @@ typedef struct {
   conf_action_t* p_action;
   int param;
 } conf_entry_t;
+
+/*============================ Function Prototypes ===========================*/
+static int send_hci_reset(void);
 
 /*================================ Varaibles =================================*/
 int mchar_fd = 0;
@@ -120,6 +124,7 @@ uint8_t independent_reset_mode = IR_MODE_NONE;
 /* 0:disable OOB IR Trigger; 1:RFKILL Trigger; 2:GPIO Trigger;*/
 uint8_t send_oob_ir_trigger = IR_TRIGGER_NONE;
 bool enable_heartbeat_config = FALSE;
+bool wakeup_enable_uart_low_config = FALSE;
 char pFilename_fw_init_config_bin[MAX_PATH_LEN];
 uint8_t write_bd_address[WRITE_BD_ADDRESS_SIZE] = {
     0xFE, /* Parameter ID */
@@ -502,6 +507,14 @@ static int set_enable_heartbeat_config(char* p_conf_name, char* p_conf_value,
   return 0;
 }
 
+static int set_wakeup_enable_uart_low_config(char* p_conf_name,
+                                             char* p_conf_value, int param) {
+  UNUSED(p_conf_name);
+  UNUSED(param);
+  wakeup_enable_uart_low_config = (atoi(p_conf_value) == 0) ? FALSE : TRUE;
+  return 0;
+}
+
 static int set_powerkey_gpio_pin(char* p_conf_name, char* p_conf_value,
                                  int param) {
   UNUSED(p_conf_name);
@@ -661,6 +674,7 @@ static const conf_entry_t conf_table[] = {
     {"use_controller_addr", set_use_controller_addr, 0},
     {"enable_heartbeat_config", set_enable_heartbeat_config, 0},
     {"wakeup_power_gpio_pin", set_powerkey_gpio_pin, 0},
+    {"wakeup_enable_uart_low_config", set_wakeup_enable_uart_low_config, 0},
     {"wakeup_power_gpio_high_duration", set_powerkey_gpio_high_duration, 0},
     {"wakeup_power_gpio_low_duration", set_powerkey_gpio_low_duration, 0},
     {"wakeup_netflix_gpio_pin", set_netflixkey_gpio_pin, 0},
@@ -737,65 +751,54 @@ static void vnd_load_conf(const char* p_path) {
  **
  ** Function:        read_hci_event
  **
- ** Description:     Reads the parameter of event received from controller.
+ ** Description:     Reads hci event.
  **
- ** Return Value:    offset of parameter
+ ** Return Value:    0 is successful, -1 otherwise
  **
  *
  *****************************************************************************/
 
-static int read_hci_event(int fd, unsigned char* buf, int size,
-                          int retry_delay_ms, int max_duration) {
+int read_hci_event(hci_event* evt_pkt, uint64_t retry_delay_ms,
+                   uint32_t max_duration_ms) {
   int remain, r;
-  int count = 0;
-  int total_duration = 0;
-
-  if (size <= 0) return -1;
+  int count;
+  uint32_t total_duration = 0;
 
   /* The first byte identifies the packet type. For HCI event packets, it
    * should be 0x04, so we read until we get to the 0x04. */
-  VND_LOGD("start read hci event 0x4");
-  while (total_duration < max_duration) {
-    r = read(fd, buf, 1);
-    if (r <= 0) {
-      VND_LOGV("read hci event 0x04 failed, retry");
-      VND_LOGV("Error %s (%d)", strerror(errno), errno);
-      usleep(retry_delay_ms * 1000);
-      total_duration += retry_delay_ms;
-      continue;
-    }
-    if (buf[0] == 0x04) break;
-  }
-  if (total_duration >= max_duration) {
-    VND_LOGE("read hci event 0x04 failed, return error. total_duration = %d",
-             total_duration);
-    return -1;
-  }
-  count++;
-
-  /* The next two bytes are the event code and parameter total length. */
-  VND_LOGD("start read hci event code and len");
-  while (count < 3) {
-    r = read(fd, buf + count, 3 - count);
-    if (r <= 0) {
-      VND_LOGE("read hci event code and len failed");
-      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
+  VND_LOGV("start read hci event 0x4");
+  count = 0;
+  while (fw_upload_GetBufferSize(mchar_fd) <
+         HCI_EVENT_HEADER_SIZE + HCI_PACKET_TYPE_SIZE) {
+    usleep(retry_delay_ms * 1000);
+    total_duration += retry_delay_ms;
+    if (total_duration >= max_duration_ms) {
+      VND_LOGE("Read hci complete event failed timmed out. Total_duration = %u",
+               total_duration);
       return -1;
     }
-    count += r;
+  };
+  r = read(mchar_fd, evt_pkt->raw_data,
+           HCI_EVENT_HEADER_SIZE + HCI_PACKET_TYPE_SIZE);
+  if (r <= 0) {
+    VND_LOGV("read hci event 0x04 failed");
+    VND_LOGV("Error %s (%d)", strerror(errno), errno);
   }
-
-  /* Now we read the parameters. */
-  VND_LOGD("start read hci event para");
-  if (buf[2] < (size - 3))
-    remain = buf[2];
-  else
-    remain = size - 3;
-  if ((int)remain > (size - 3)) {
+  if (evt_pkt->info.packet_type != HCI_PACKET_EVENT) {
+    VND_LOGE("Invalid packet type(%02X) received", evt_pkt->info.packet_type);
     return -1;
   }
-  while ((count - 3) < remain) {
-    r = read(fd, buf + count, remain - (count - 3));
+  /* Now we read the parameters. */
+  VND_LOGV("start read hci event para");
+  if (evt_pkt->info.para_len < HCI_EVENT_PAYLOAD_SIZE) {
+    remain = evt_pkt->info.para_len;
+  } else {
+    remain = HCI_EVENT_PAYLOAD_SIZE;
+    VND_LOGE("Payload size(%d) greater than capacity", evt_pkt->info.para_len);
+  }
+
+  while ((count) < remain) {
+    r = read(mchar_fd, evt_pkt->info.payload + count, remain - (count));
     if (r <= 0) {
       VND_LOGE("read hci event para failed");
       VND_LOGE("Error: %s (%d)", strerror(errno), errno);
@@ -803,9 +806,121 @@ static int read_hci_event(int fd, unsigned char* buf, int size,
     }
     count += r;
   }
+  return 0;
+}
 
-  VND_LOGD("over read count = %d", count);
-  return count;
+/******************************************************************************
+ **
+ ** Function:        check_hci_event_status
+ **
+ ** Description:     Parse evt_pkt for opcode.
+ **
+ ** Return Value:    0 is successful, -1 otherwise
+ **
+ *
+ *****************************************************************************/
+static int8_t check_hci_event_status(hci_event* evt_pkt, uint16_t opcode) {
+  int ret = -1;
+  uint8_t* ptr;
+  uint16_t pkt_opcode;
+  switch (evt_pkt->info.event_type) {
+    case HCI_EVENT_COMMAND_COMPLETE:
+      if (evt_pkt->info.para_len > HCI_EVT_PLYD_STATUS_IDX) {
+        ptr = &evt_pkt->info.payload[HCI_EVT_PLYD_OPCODE_IDX];
+        STREAM_TO_UINT16(pkt_opcode, ptr);
+        VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x",
+                 pkt_opcode, hw_bt_cmd_to_str(pkt_opcode),
+                 evt_pkt->info.payload[HCI_EVT_PLYD_STATUS_IDX]);
+        if (evt_pkt->info.payload[HCI_EVT_PLYD_STATUS_IDX] != 0) {
+          VND_LOGE(
+              "Error status recevied for command 0x%04hX (%s) status 0x%02x",
+              pkt_opcode, hw_bt_cmd_to_str(pkt_opcode),
+              evt_pkt->info.payload[HCI_EVT_PLYD_STATUS_IDX]);
+        }
+        if (pkt_opcode == opcode) ret = 0;
+      } else {
+        VND_LOGE("Unexpected packet length received. Event type:%02x Len:%02x",
+                 evt_pkt->info.event_type, evt_pkt->info.para_len);
+      }
+      break;
+    case HCI_EVENT_HARDWARE_ERROR:
+      VND_LOGE("Hardware error event(%02x) received ",
+               evt_pkt->info.event_type);
+      VND_LOGE("Payload length received %02x", evt_pkt->info.para_len);
+      if (evt_pkt->info.para_len > 0) {
+        VND_LOGE("Hardware error code: %02x", evt_pkt->info.payload[0]);
+      }
+      break;
+    default:
+      VND_LOGE("Invalid Event type %02x received ", evt_pkt->info.event_type);
+  }
+  VND_LOGV("Packet dump");
+  for (int i = 0; i < evt_pkt->info.para_len + HCI_PACKET_TYPE_SIZE +
+                          HCI_EVENT_HEADER_SIZE;
+       i++) {
+    VND_LOGV("Packet[%d]= %02x", i, evt_pkt->raw_data[i]);
+  }
+  if (evt_pkt->info.event_type == HCI_EVENT_HARDWARE_ERROR) {
+    /*BLUETOOTH CORE SPECIFICATION Version 5.4 | Vol 4, Part A Point 4*/
+    ret = send_hci_reset();
+  }
+  return ret;
+}
+
+/******************************************************************************
+ **
+ ** Function:        read_hci_event_status
+ **
+ ** Description:     Polls HCI_EVENT with opcode till max_duration_ms and checks
+ *                   its status.
+ **
+ ** Return Value:    0 is successful, -1 otherwise
+ **
+ *
+ *****************************************************************************/
+static int8_t read_hci_event_status(int16_t opcode, uint64_t retry_delay_ms,
+                                    uint64_t max_duration_ms) {
+  int8_t ret = -1;
+  hci_event evt_pkt;
+  uint64_t start_ms = fw_upload_GetTime();
+  uint64_t cost_ms;
+  uint64_t remaining_time_ms = max_duration_ms;
+  VND_LOGD("Reading %s event", hw_bt_cmd_to_str(opcode));
+  while (((cost_ms = fw_upload_GetTime() - start_ms) < max_duration_ms) &&
+         (read_hci_event(&evt_pkt, retry_delay_ms, remaining_time_ms) == 0)) {
+    if ((ret = check_hci_event_status(&evt_pkt, opcode)) == 0) {
+      break;
+    }
+    remaining_time_ms = max_duration_ms - (fw_upload_GetTime() - start_ms);
+  }
+  if (cost_ms >= max_duration_ms) {
+    VND_LOGE("Read hci complete event failed, timed out at: %u",
+             (uint32_t)cost_ms);
+  }
+  return ret;
+}
+
+/*******************************************************************************
+**
+** Function        send_hci_reset
+**
+** Description     Send HCI reset command over raw UART.
+**
+** Returns         0 on success, -1 on failure
+**
+*******************************************************************************/
+static int send_hci_reset(void) {
+  int ret = -1;
+  if (hw_bt_send_hci_cmd_raw(HCI_CMD_NXP_RESET) != 0) {
+    VND_LOGE("Failed to write reset command");
+  } else if ((read_hci_event_status(HCI_CMD_NXP_RESET, POLL_CONFIG_UART_MS,
+                                    POLL_MAX_TIMOUT_MS) != 0)) {
+    VND_LOGE("Failed to read HCI RESET CMD response!");
+  } else {
+    VND_LOGD("HCI reset completed successfully");
+    ret = 0;
+  }
+  return ret;
 }
 
 void set_prop_int32(char* name, int value) {
@@ -966,7 +1081,7 @@ static int32 uart_set_speed(int32 fd, struct termios* ti, int32 speed) {
     VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return -1;
   }
-  VND_LOGD("Baudrate set to %d", speed);
+  VND_LOGD("Host baudrate set to %d", speed);
   return 0;
 }
 
@@ -1170,74 +1285,35 @@ done:
 *******************************************************************************/
 
 static int config_uart() {
-  int clen;
-  unsigned char set_speed_cmd_3m[8] = {0x01, 0x09, 0xFC, 0x04,
-                                       0xC0, 0xC6, 0x2D, 0x00};
-  unsigned char set_speed_cmd[8] = {0x01, 0x09, 0xFC, 0x04,
-                                    0x00, 0xC2, 0x01, 0x00};
-  unsigned char reset_cmd[4] = {0x01, 0x03, 0x0c, 0x00};
-  int resp_size;
-  unsigned char resp[10] = {0};
-  unsigned char resp_cmp[7] = {0x4, 0xe, 0x4, 0x1, 0x9, 0xfc, 0x0};
-  unsigned char resp_cmp_reset[7] = {0x4, 0xe, 0x4, 0x1, 0x3, 0xc, 0x0};
-
   if (baudrate_fw_init != baudrate_bt) {
     /* set baud rate to baudrate_fw_init */
     if (uart_set_speed(mchar_fd, &ti, baudrate_fw_init) < 0) {
       VND_LOGE("Can't set baud rate");
       return -1;
     }
-
-    /* Sending HCI reset CMD  */
-    VND_LOGD("start send bt hci reset");
-    memset(resp, 0x00, 10);
-    clen = sizeof(reset_cmd);
-    VND_LOGD("Write HCI Reset command");
-    if (write(mchar_fd, reset_cmd, clen) != clen) {
-      VND_LOGE("Failed to write reset command");
-      VND_LOGE("Error: %s (%d)", strerror(errno), errno);
+    if (send_hci_reset() != 0) {
       return -1;
     }
-
-    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS,
-                                    POLL_MAX_TIMOUT_MS)) < 0 ||
-        memcmp(resp, resp_cmp_reset, 7)) {
-      VND_LOGE("Failed to read HCI RESET CMD response!");
-      return -1;
-    }
-    VND_LOGD("over send bt hci reset");
-
     /* Set bt chip Baud rate CMD */
-    VND_LOGD("start set fw baud rate according to baudrate_bt");
-    clen = sizeof(set_speed_cmd);
-    if (baudrate_bt == 3000000) {
-      VND_LOGD("set fw baudrate as 3000000");
-      if (write(mchar_fd, set_speed_cmd_3m, clen) != clen) {
+    if ((baudrate_bt == 3000000) || (baudrate_bt == 115200)) {
+      VND_LOGD("set fw baudrate as %d", baudrate_bt);
+      if (hw_send_change_baudrate_raw(baudrate_bt)) {
         VND_LOGE("Failed to write set baud rate command");
-        VND_LOGE("Error: %s (%d)", strerror(errno), errno);
         return -1;
       }
-    } else if (baudrate_bt == 115200) {
-      VND_LOGD("set fw baudrate as 115200");
-      if (write(mchar_fd, set_speed_cmd, clen) != clen) {
-        VND_LOGE("Failed to write set baud rate command");
-        VND_LOGE("Error: %s (%d)", strerror(errno), errno);
+      VND_LOGV("start read hci event");
+      if (read_hci_event_status(HCI_CMD_NXP_CHANGE_BAUDRATE,
+                                POLL_CONFIG_UART_MS, POLL_MAX_TIMOUT_MS) != 0) {
+        VND_LOGE("Failed to read set baud rate command response! ");
         return -1;
       }
+      VND_LOGD("Controller Buadrate changed successfully to %d", baudrate_bt);
+    } else {
+      VND_LOGD("Unsupported baudrate_bt %d", baudrate_bt);
     }
 
-    VND_LOGD("start read hci event");
-    memset(resp, 0x00, 10);
-    if ((resp_size = read_hci_event(mchar_fd, resp, 10, POLL_CONFIG_UART_MS,
-                                    POLL_MAX_TIMOUT_MS)) < 0 ||
-        memcmp(resp, resp_cmp, 7)) {
-      VND_LOGE("Failed to read set baud rate command response! ");
-      return -1;
-    }
-    VND_LOGD("over send bt chip baudrate");
     usleep(60000); /* Sleep to allow baud rate setting to happen in FW */
-    /* set host uart speed according to baudrate_bt */
-    VND_LOGD("start set host baud rate as baudrate_bt");
+
     tcflush(mchar_fd, TCIOFLUSH);
     if (uart_set_speed(mchar_fd, &ti, baudrate_bt)) {
       VND_LOGE("Failed to  set baud rate ");
@@ -1252,7 +1328,7 @@ static int config_uart() {
     tcflush(mchar_fd, TCIOFLUSH);
   } else {
     /* set host uart speed according to baudrate_bt */
-    VND_LOGD("start set host baud rate as baudrate_bt");
+    VND_LOGD("Set host baud rate as %d", baudrate_bt);
     tcflush(mchar_fd, TCIOFLUSH);
 
     /* Close and open the port as setting baudrate to baudrate_bt */
@@ -1425,11 +1501,6 @@ void bt_vnd_gpio_configuration(int value) {
 **
 *******************************************************************************/
 static int bt_vnd_send_inband_ir(int32_t baudrate) {
-  int cmd_resp_len = 0;
-  unsigned char inband_reset_cmd[] = {0x01, 0xFC, 0xFC, 0x00};
-  unsigned char inband_reset_resp[] = {0x04, 0x0E, 0x04, 0x01,
-                                       0xFC, 0xFC, 0x00};
-  unsigned char hci_resp[sizeof(inband_reset_resp)];
   int32_t _last_baudrate = last_baudrate;
 
   if (get_prop_int32(PROP_BLUETOOTH_INBAND_CONFIGURED) == 1) {
@@ -1442,20 +1513,15 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
       VND_LOGD("Baud rate changed from %d to %d with flow control enabled",
                baudrate, _last_baudrate);
     }
-    cmd_resp_len = sizeof(inband_reset_cmd);
     tcflush(mchar_fd, TCIOFLUSH);
-    if (write(mchar_fd, inband_reset_cmd, cmd_resp_len) != cmd_resp_len) {
+    if (hw_bt_send_hci_cmd_raw(HCI_CMD_INBAND_RESET)) {
       VND_LOGE("Failed to write in-band reset command ");
       VND_LOGE("Error: %s (%d)", strerror(errno), errno);
       return -1;
     } else {
-      VND_LOGD("start read hci event");
-      cmd_resp_len = sizeof(inband_reset_resp);
-      memset(hci_resp, 0x00, cmd_resp_len);
-      if ((cmd_resp_len != read_hci_event(mchar_fd, hci_resp, cmd_resp_len,
-                                          POLL_INBAND_COMMAND_MS,
-                                          POLL_MAX_TIMOUT_MS)) ||
-          memcmp(hci_resp, inband_reset_resp, cmd_resp_len) != 0) {
+      VND_LOGV("start read hci event");
+      if (read_hci_event_status(HCI_CMD_INBAND_RESET, POLL_RETRY_TIMEOUT_MS,
+                                POLL_MAX_TIMOUT_MS) != 0) {
         VND_LOGE("Failed to read Inband reset response");
         return -1;
       }
@@ -1472,6 +1538,39 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
     }
   }
   return 0;
+}
+
+/*******************************************************************************
+**
+** Function        send_exit_heartbeat_mode
+**
+** Description     Exit heartbeat mode during bluetooth disabling procedure
+**
+**
+** Returns         0 : Success
+**                 Otherwise : Fail
+**
+*******************************************************************************/
+static void send_exit_heartbeat_mode(void) {
+  hci_event evt_pkt;
+  VND_LOGD("Start to send exit heartbeat cmd ...\n");
+  memset(&evt_pkt, 0x00, sizeof(evt_pkt));
+
+  if (hw_bt_send_wakeup_disable_raw()) {
+    VND_LOGD("Failed to write exit heartbeat command \n");
+    return;
+  }
+  if (read_hci_event(&evt_pkt, POLL_RETRY_TIMEOUT_MS, POLL_CONFIG_UART_MS) ==
+          0 &&
+      check_hci_event_status(&evt_pkt, HCI_CMD_NXP_BLE_WAKEUP) == 0 &&
+      evt_pkt.info.para_len > HCI_EVT_PLYD_SUBCODE_IDX &&
+      evt_pkt.info.payload[HCI_EVT_PLYD_SUBCODE_IDX] ==
+          HCI_CMD_OTT_SUB_WAKEUP_EXIT_HEARTBEATS) {
+    VND_LOGD("Exit heartbeat mode cmd sent successfully\n");
+  } else {
+    VND_LOGD("Failed to read exit heartbeat cmd response! \n");
+  }
+  return;
 }
 
 /*****************************************************************************
@@ -1738,6 +1837,11 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       VND_LOGD("open serial port over --------------------------------------");
     } break;
     case BT_VND_OP_USERIAL_CLOSE:
+
+      if (enable_heartbeat_config == TRUE) {
+        send_exit_heartbeat_mode();
+      }
+      send_hci_reset();
       /* mBtChar port is blocked on read. Release the port before we close it */
       if (is_uart_port) {
         if (mchar_fd) {

@@ -74,7 +74,7 @@
 static uint8 ucByteBuffer[MAX_LENGTH];
 
 // Size of the File to be downloaded
-static uint32 ulTotalFileSize = 0;
+static uint32 uiTotalFileSize = 0;
 
 // Current size of the Download
 static uint32 ulCurrFileSize = 0;
@@ -711,7 +711,7 @@ static uint16 fw_upload_SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend) {
 #endif
     // start to send Temp buffer
     uiLen = fw_upload_SendBuffer(uiLenToSend, ucByteBuffer);
-    VND_LOGV("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
+    VND_LOGV("File downloaded: %8d:%8d\r", ulCurrFileSize, uiTotalFileSize);
   }
   return uiLen;
 }
@@ -747,7 +747,7 @@ static BOOLEAN fw_upload_FW(int8* pFileName) {
   BOOLEAN bRetVal = FALSE;
   int32 result = 0;
   uint16 uiLenToSend = 0;
-
+  long TotalFileSize;
   uint32 ulOffsettoSend = 0;
   uint16 uiErrCode = 0;
 
@@ -767,21 +767,22 @@ static BOOLEAN fw_upload_FW(int8* pFileName) {
     return bRetVal;
   }
 
-  ulTotalFileSize = (uint32)ftell(pFile);
-  if (!ulTotalFileSize) {
-    VND_LOGE("Error:Download Size is 0");
+  TotalFileSize = ftell(pFile);
+  if (TotalFileSize == -1) {
+    VND_LOGE("Invalid Download Size");
     VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return bRetVal;
   }
+  uiTotalFileSize =(uint32) TotalFileSize;
 
-  pFileBuffer = (uint8*)malloc(ulTotalFileSize);
+  pFileBuffer = (uint8*)malloc(uiTotalFileSize);
 
   if (fseek(pFile, 0, SEEK_SET) < 0) {
     VND_LOGE("fseek error: %s (%d)", strerror(errno), errno);
   }
   if (pFileBuffer) {
-    ulReadLen = fread(pFileBuffer, 1, ulTotalFileSize, pFile);
-    if (ulReadLen != ulTotalFileSize) {
+    ulReadLen = fread(pFileBuffer, 1, uiTotalFileSize, pFile);
+    if (ulReadLen != uiTotalFileSize) {
       VND_LOGV("fread error: %s (%d)", strerror(errno), errno);
       return bRetVal;
     }
@@ -827,7 +828,7 @@ static BOOLEAN fw_upload_FW(int8* pFileName) {
         tcflush(mchar_fd, TCIFLUSH);
         fw_upload_SendIntBytes(ulOffsettoSend);
       }
-      VND_LOGV("File downloaded: %8d:%8d\r", ulCurrFileSize, ulTotalFileSize);
+      VND_LOGV("File downloaded: %8d:%8d\r", ulCurrFileSize, uiTotalFileSize);
 
       // Ensure any pending write data is completely written
       if (0 == tcdrain(mchar_fd)) {

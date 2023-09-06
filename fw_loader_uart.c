@@ -161,7 +161,7 @@ typedef struct {
 static uint8 ucByteBuffer[MAX_LENGTH];
 
 // Size of the File to be downloaded
-static long ulTotalFileSize = 0;
+static uint32 uiTotalFileSize = 0;
 
 // Current size of the Download
 static uint32 ulCurrFileSize = 0;
@@ -428,7 +428,7 @@ static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs) {
               usleep(1000);
             };
             VND_LOGD("Buffer size=%d", fw_upload_GetBufferSize(mchar_fd));
-            for (int i = 0; i < sizeof(v3_start_ind.pyld_buff); i++) {
+            for (uint8 i = 0; i < sizeof(v3_start_ind.pyld_buff); i++) {
               v3_start_ind.pyld_buff |=
                   ((fw_upload_ComReadChar(mchar_fd) & 0xFF) << i * 8);
             }
@@ -1251,8 +1251,8 @@ static uint16 fw_upload_V1SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend) {
   cmd7_Req = FALSE;
   EntryPoint_Req = FALSE;
 
-  if (ulCurrFileSize + uiLenToSend > ulTotalFileSize)
-    uiLenToSend = ulTotalFileSize - ulCurrFileSize;
+  if (ulCurrFileSize + uiLenToSend > uiTotalFileSize)
+    uiLenToSend = uiTotalFileSize - ulCurrFileSize;
 
   memcpy(&ucByteBuffer[uiLenToSend] - uiLenToSend, pFileBuffer + ulCurrFileSize,
          uiLenToSend);
@@ -1265,7 +1265,7 @@ static uint16 fw_upload_V1SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend) {
     ucDataLen = fw_upload_GetDataLen(ucByteBuffer);
     memcpy(&ucByteBuffer[uiLenToSend], pFileBuffer + ulCurrFileSize, ucDataLen);
     ulCurrFileSize += ucDataLen;
-    if ((ulCurrFileSize < ulTotalFileSize) &&
+    if ((ulCurrFileSize < uiTotalFileSize) &&
         (ulCmd == CMD6 || ulCmd == CMD4)) {
       EntryPoint_Req = TRUE;
     }
@@ -1281,7 +1281,7 @@ static uint16 fw_upload_V1SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend) {
 #endif
   // start to send Temp buffer
   uiLen = fw_upload_SendBuffer(uiLenToSend, ucByteBuffer, FALSE);
-  VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
+  VND_LOGV("File downloaded: %8u:%8u\r", ulCurrFileSize, uiTotalFileSize);
 
   return uiLen;
 }
@@ -1911,9 +1911,9 @@ static uint8* bt_get_fw_config_cmd5_data(void) {
     VND_LOGD("%s file not found : error %s (%d)", pFilename_fw_init_config_bin,
              strerror(errno), errno);
   } else {
+    long data_size;
     VND_LOGD("%s file opened successfully", pFilename_fw_init_config_bin);
     /*Make sure length of file is in limit and copied in fw_init_config_bin */
-    long data_size;
     if (fseek(fp, 0, SEEK_END) < 0) {
       VND_LOGE("fseek error: %s (%d)", strerror(errno), errno);
     }
@@ -1922,7 +1922,7 @@ static uint8* bt_get_fw_config_cmd5_data(void) {
       if (fseek(fp, 0, SEEK_SET) < 0) {
         VND_LOGE("fseek error: %s (%d)", strerror(errno), errno);
       }
-      ret = (fread(fw_init_config_bin, 1, data_size, fp) == data_size)
+      ret = (fread(fw_init_config_bin, 1, data_size, fp) == (uint32)data_size)
                 ? fw_init_config_bin
                 : NULL;
     } else {
@@ -1967,6 +1967,7 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
   FILE* pFile = NULL;
   BOOLEAN bRetVal = FALSE;
   int32 result = 0;
+  int32 TotalFileSize;
   uint16 uiLenToSend = 0;
   BOOLEAN bFirstWaitHeaderSignature = TRUE;
   BOOLEAN check_sig_hdr = TRUE;
@@ -2047,14 +2048,15 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
     return FEEK_SEEK_ERROR;
   }
 
-  ulTotalFileSize = (long)ftell(pFile);
-  if (ulTotalFileSize <= 0) {
+  TotalFileSize = ftell(pFile);
+  if (TotalFileSize == -1) {
     VND_LOGV("Error:Download Size is 0");
+    VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     fclose(pFile);
     return FILESIZE_IS_ZERO;
   }
-
-  pFileBuffer = (uint8*)malloc((size_t)ulTotalFileSize);
+  uiTotalFileSize = TotalFileSize;
+  pFileBuffer = (uint8*)malloc((size_t)uiTotalFileSize);
   if (pFileBuffer == NULL) {
     VND_LOGV("malloc() returned NULL while allocating size for file");
     fclose(pFile);
@@ -2071,8 +2073,8 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
 
   if (pFileBuffer != (void*)0) {
     ulReadLen = (uint32)fread((void*)pFileBuffer, (size_t)1,
-                              (size_t)ulTotalFileSize, pFile);
-    if (ulReadLen != ulTotalFileSize) {
+                              (size_t)uiTotalFileSize, pFile);
+    if (ulReadLen != uiTotalFileSize) {
       VND_LOGV("Error:Read File Fail");
       free(pFileBuffer);
       fclose(pFile);
@@ -2103,17 +2105,17 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
       if (check_sig_hdr) {
         uiLenToSend = fw_upload_WaitFor_Len(pFile);
       }
-      VND_LOGV("Number of bytes to be downloaded: %8ld\r", ulTotalFileSize);
+      VND_LOGV("Number of bytes to be downloaded: %8u\r", uiTotalFileSize);
       tcflush(mchar_fd, TCIFLUSH);
       do {
-        if (uiLenToSend > ulTotalFileSize) {
+        if (uiLenToSend > uiTotalFileSize) {
           free(pFileBuffer);
           fclose(pFile);
           return INVALID_LEN_TO_SEND;
         }
         uiLenToSend = fw_upload_V1SendLenBytes(pFileBuffer, uiLenToSend);
       } while (uiLenToSend != 0);
-      VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
+      VND_LOGV("File downloaded: %8u:%8u\r", ulCurrFileSize, uiTotalFileSize);
       // If the Length requested is 0, download is complete.
       if (uiLenToSend == 0) {
         bRetVal = TRUE;
@@ -2166,7 +2168,7 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
           }
         }
       }
-      VND_LOGV("File downloaded: %8u:%8ld\r", ulCurrFileSize, ulTotalFileSize);
+      VND_LOGV("File downloaded: %8u:%8u\r", ulCurrFileSize, uiTotalFileSize);
     } else {
       VND_LOGV("%d Protocol Version not supported", uiProVer);
     }

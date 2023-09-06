@@ -57,5 +57,5 @@ extern void fw_upload_ComReadChars(int32 mchar_fd, uint8* pChBuffer,
 extern void fw_upload_DelayInMs(uint32 uiMs);
 extern int32 fw_upload_ComGetCTS(int32 mchar_fd);
 extern uint64 fw_upload_GetTime(void);
-extern int32 fw_upload_GetBufferSize(int32 mchar_fd);
+extern uint32 fw_upload_GetBufferSize(int32 mchar_fd);
 #endif  // FW_LOADER_IO_LINUX_H

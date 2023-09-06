@@ -43,7 +43,7 @@
 
 /*================================== Macros ==================================*/
 
-#define BT_HAL_VERSION "009.018"
+#define BT_HAL_VERSION "009.020"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -97,7 +97,7 @@
 #define NXP_WAKEUP_ADV_PATTERN_LENGTH 16  // company id + vendor information
 #define PROP_BLUETOOTH_INIT_ATTEMPTED "bluetooth.nxp.init_attempted"
 #define PROP_VENDOR_TRIGGER_PDN "vendor.nxp.trigger_pdn"
-#define PDN_RECOVERY_THRESHOLD (3)
+#define PDN_RECOVERY_THRESHOLD (2)
 #define PROP_BLUETOOTH_FW_DOWNLOADED "bluetooth.nxp.fw_downloaded"
 #define PROP_BLUETOOTH_INBAND_CONFIGURED "bluetooth.nxp.inband_ir_configured"
 #define PROP_BLUETOOTH_BOOT_SLEEP_TRIGGER \

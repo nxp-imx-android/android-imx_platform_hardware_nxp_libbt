@@ -796,7 +796,7 @@ int read_hci_event(hci_event* evt_pkt, uint64_t retry_delay_ms,
     remain = HCI_EVENT_PAYLOAD_SIZE;
     VND_LOGE("Payload size(%d) greater than capacity", evt_pkt->info.para_len);
   }
-
+  while (fw_upload_GetBufferSize(mchar_fd) < (uint32_t)remain);
   while ((count) < remain) {
     r = read(mchar_fd, evt_pkt->info.payload + count, remain - (count));
     if (r <= 0) {
@@ -1262,10 +1262,6 @@ static int detect_and_download_fw() {
     tcflush(mchar_fd, TCIFLUSH);
     if (uart_sleep_after_dl) usleep(uart_sleep_after_dl * 1000);
   }
-  if (enable_pdn_recovery) {
-    ALOGI("%s:%d\n", PROP_VENDOR_TRIGGER_PDN,
-          get_prop_int32(PROP_VENDOR_TRIGGER_PDN));
-  }
 done:
   return download_ret;
 }
@@ -1664,18 +1660,6 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
       int bluetooth_opened;
       int num = 0;
       int32_t baudrate = 0;
-      if (enable_pdn_recovery == TRUE) {
-        int init_attempted = get_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED);
-        if (init_attempted >= PDN_RECOVERY_THRESHOLD) {
-          VND_LOGE("%s: %s(%d) > %d, Triggering PDn recovery.\n", __FUNCTION__,
-                   PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted,
-                   PDN_RECOVERY_THRESHOLD);
-          set_prop_int32(PROP_VENDOR_TRIGGER_PDN, 1);
-          set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, 0);
-        } else {
-          set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted + 1);
-        }
-      }
       if (is_uart_port) {
         VND_LOGD("baudrate_bt %d", baudrate_bt);
         VND_LOGD("baudrate_fw_init %d", baudrate_fw_init);
@@ -1755,6 +1739,21 @@ static int bt_vnd_op(bt_vendor_opcode_t opcode, void* param) {
           if (detect_and_download_fw()) {
             VND_LOGE("detect_and_download_fw failed");
             set_prop_int32(PROP_BLUETOOTH_FW_DOWNLOADED, 0);
+            if (enable_pdn_recovery == TRUE) {
+              int init_attempted =
+                  get_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED);
+              init_attempted = (init_attempted == -1) ? 0 : init_attempted;
+              if (++init_attempted >= PDN_RECOVERY_THRESHOLD) {
+                VND_LOGE("%s: %s(%d) > %d, Triggering PDn recovery.\n",
+                         __FUNCTION__, PROP_BLUETOOTH_INIT_ATTEMPTED,
+                         init_attempted, PDN_RECOVERY_THRESHOLD);
+                set_prop_int32(PROP_VENDOR_TRIGGER_PDN, 1);
+                set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, 0);
+              } else {
+                set_prop_int32(PROP_BLUETOOTH_INIT_ATTEMPTED, init_attempted);
+                ALOGI("%s:%d\n", PROP_VENDOR_TRIGGER_PDN, init_attempted);
+              }
+            }
             return -1;
           }
         } else {

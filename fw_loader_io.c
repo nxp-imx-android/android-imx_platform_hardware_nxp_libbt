@@ -319,8 +319,8 @@ int32 fw_upload_ComGetCTS(int32 mchar_fd) {
  *   None.
  *
  *****************************************************************************/
-int32 fw_upload_GetBufferSize(int32 mchar_fd) {
-  int32 bytes = 0;
+uint32 fw_upload_GetBufferSize(int32 mchar_fd) {
+  uint32 bytes = 0;
   if (ioctl(mchar_fd, FIONREAD, &bytes) < 0) {
     VND_LOGE("ioctl error: %s (%d)", strerror(errno), errno);
   }

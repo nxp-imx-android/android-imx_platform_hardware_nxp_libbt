@@ -797,10 +797,10 @@ int8 hw_bt_send_hci_cmd_raw(uint16_t opcode) {
  **
  *****************************************************************************/
 static int hw_bt_load_cal_file(const char* cal_file_name, uint8_t* cal_data,
-                               uint32_t* cal_data_size) {
+                               uint32* cal_data_size) {
   FILE* fp = fopen(cal_file_name, "r");
   unsigned int data;
-  int data_len = 0;
+  uint32 data_len = 0;
   int ret = -1;
   if (fp == NULL) {
     VND_LOGD("Can't open calibration file: %s ", cal_file_name);

@@ -70,7 +70,7 @@
 #define POLL_DRIVER_MAX_TIME_MS (20000)
 #define POLL_CONFIG_UART_MS (10)
 #define POLL_RETRY_TIMEOUT_MS (1)
-#define POLL_MAX_TIMOUT_MS (1000)
+#define POLL_MAX_TIMEOUT_MS (1000)
 
 #define CONF_COMMENT '#'
 #define CONF_DELIMITERS " =\n\r\t"
@@ -93,7 +93,7 @@ typedef struct {
 /*============================ Function Prototypes ===========================*/
 static int send_hci_reset(void);
 
-/*================================ Varaibles =================================*/
+/*================================ Variables =================================*/
 int mchar_fd = 0;
 int vhal_trace_level = BT_TRACE_LEVEL_INFO;
 struct termios ti;
@@ -169,7 +169,7 @@ wakeup_scan_param_config_t wakeup_scan_param_config = {.le_scan_type = 0,
                                                        .window = 96,
                                                        .own_addr_type = 0,
                                                        .scan_filter_policy = 0};
-wakeup_local_param_config_t wakup_local_param_config = {.heartbeat_timer_value =
+wakeup_local_param_config_t wakeup_local_param_config = {.heartbeat_timer_value =
                                                             8};
 
 /*============================== Coded Procedures ============================*/
@@ -630,7 +630,7 @@ static int set_wakeup_local_heartbeat_timer_value(char* p_conf_name,
                                                   int param) {
   UNUSED(p_conf_name);
   UNUSED(param);
-  wakup_local_param_config.heartbeat_timer_value =
+  wakeup_local_param_config.heartbeat_timer_value =
       (unsigned char)atoi(p_conf_value);
   return 0;
 }
@@ -773,7 +773,7 @@ int read_hci_event(hci_event* evt_pkt, uint64_t retry_delay_ms,
     usleep(retry_delay_ms * 1000);
     total_duration += retry_delay_ms;
     if (total_duration >= max_duration_ms) {
-      VND_LOGE("Read hci complete event failed timmed out. Total_duration = %u",
+      VND_LOGE("Read hci complete event failed timed out. Total_duration = %u",
                total_duration);
       return -1;
     }
@@ -825,17 +825,17 @@ static int8_t check_hci_event_status(hci_event* evt_pkt, uint16_t opcode) {
   uint16_t pkt_opcode;
   switch (evt_pkt->info.event_type) {
     case HCI_EVENT_COMMAND_COMPLETE:
-      if (evt_pkt->info.para_len > HCI_EVT_PLYD_STATUS_IDX) {
-        ptr = &evt_pkt->info.payload[HCI_EVT_PLYD_OPCODE_IDX];
+      if (evt_pkt->info.para_len > HCI_EVT_PYLD_STATUS_IDX) {
+        ptr = &evt_pkt->info.payload[HCI_EVT_PYLD_OPCODE_IDX];
         STREAM_TO_UINT16(pkt_opcode, ptr);
         VND_LOGD("Reply received for command 0x%04hX (%s) status 0x%02x",
                  pkt_opcode, hw_bt_cmd_to_str(pkt_opcode),
-                 evt_pkt->info.payload[HCI_EVT_PLYD_STATUS_IDX]);
-        if (evt_pkt->info.payload[HCI_EVT_PLYD_STATUS_IDX] != 0) {
+                 evt_pkt->info.payload[HCI_EVT_PYLD_STATUS_IDX]);
+        if (evt_pkt->info.payload[HCI_EVT_PYLD_STATUS_IDX] != 0) {
           VND_LOGE(
-              "Error status recevied for command 0x%04hX (%s) status 0x%02x",
+              "Error status received for command 0x%04hX (%s) status 0x%02x",
               pkt_opcode, hw_bt_cmd_to_str(pkt_opcode),
-              evt_pkt->info.payload[HCI_EVT_PLYD_STATUS_IDX]);
+              evt_pkt->info.payload[HCI_EVT_PYLD_STATUS_IDX]);
         }
         if (pkt_opcode == opcode) ret = 0;
       } else {
@@ -914,7 +914,7 @@ static int send_hci_reset(void) {
   if (hw_bt_send_hci_cmd_raw(HCI_CMD_NXP_RESET) != 0) {
     VND_LOGE("Failed to write reset command");
   } else if ((read_hci_event_status(HCI_CMD_NXP_RESET, POLL_CONFIG_UART_MS,
-                                    POLL_MAX_TIMOUT_MS) != 0)) {
+                                    POLL_MAX_TIMEOUT_MS) != 0)) {
     VND_LOGE("Failed to read HCI RESET CMD response!");
   } else {
     VND_LOGD("HCI reset completed successfully");
@@ -1142,7 +1142,7 @@ int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl) {
   tcflush(fd, TCIOFLUSH);
   if (independent_reset_mode == IR_MODE_INBAND_VSC) {
     last_baudrate = uart_get_speed(&ti);
-    VND_LOGD("Last buad rate = %d", last_baudrate);
+    VND_LOGD("Last baud rate = %d", last_baudrate);
   }
   /* Set actual baudrate */
   if (uart_set_speed(fd, &ti, dwBaudRate) < 0) {
@@ -1299,11 +1299,11 @@ static int config_uart() {
       }
       VND_LOGV("start read hci event");
       if (read_hci_event_status(HCI_CMD_NXP_CHANGE_BAUDRATE,
-                                POLL_CONFIG_UART_MS, POLL_MAX_TIMOUT_MS) != 0) {
+                                POLL_CONFIG_UART_MS, POLL_MAX_TIMEOUT_MS) != 0) {
         VND_LOGE("Failed to read set baud rate command response! ");
         return -1;
       }
-      VND_LOGD("Controller Buadrate changed successfully to %d", baudrate_bt);
+      VND_LOGD("Controller Baudrate changed successfully to %d", baudrate_bt);
     } else {
       VND_LOGD("Unsupported baudrate_bt %d", baudrate_bt);
     }
@@ -1517,11 +1517,11 @@ static int bt_vnd_send_inband_ir(int32_t baudrate) {
     } else {
       VND_LOGV("start read hci event");
       if (read_hci_event_status(HCI_CMD_INBAND_RESET, POLL_RETRY_TIMEOUT_MS,
-                                POLL_MAX_TIMOUT_MS) != 0) {
+                                POLL_MAX_TIMEOUT_MS) != 0) {
         VND_LOGE("Failed to read Inband reset response");
         return -1;
       }
-      VND_LOGD("=========Inband IR trigger sent succesfully=======");
+      VND_LOGD("=========Inband IR trigger sent successfully=======");
     }
     close(mchar_fd);
     mchar_fd = uart_init_open(mchar_port, baudrate, 0);
@@ -1559,8 +1559,8 @@ static void send_exit_heartbeat_mode(void) {
   if (read_hci_event(&evt_pkt, POLL_RETRY_TIMEOUT_MS, POLL_CONFIG_UART_MS) ==
           0 &&
       check_hci_event_status(&evt_pkt, HCI_CMD_NXP_BLE_WAKEUP) == 0 &&
-      evt_pkt.info.para_len > HCI_EVT_PLYD_SUBCODE_IDX &&
-      evt_pkt.info.payload[HCI_EVT_PLYD_SUBCODE_IDX] ==
+      evt_pkt.info.para_len > HCI_EVT_PYLD_SUBCODE_IDX &&
+      evt_pkt.info.payload[HCI_EVT_PYLD_SUBCODE_IDX] ==
           HCI_CMD_OTT_SUB_WAKEUP_EXIT_HEARTBEATS) {
     VND_LOGD("Exit heartbeat mode cmd sent successfully\n");
   } else {

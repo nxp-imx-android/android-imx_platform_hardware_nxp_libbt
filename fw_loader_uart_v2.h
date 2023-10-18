@@ -20,7 +20,7 @@
  *
  *  Filename:      fw_loader_uart_v2.h
  *
- *  Description:   Firmware loader vesion 2 function declarations
+ *  Description:   Firmware loader version 2 function declarations
  *
  ******************************************************************************/
 

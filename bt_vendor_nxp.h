@@ -43,7 +43,7 @@
 
 /*================================== Macros ==================================*/
 
-#define BT_HAL_VERSION "009.020"
+#define BT_HAL_VERSION "009.021"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -111,9 +111,9 @@
 #define HCI_EVENT_COMMAND_COMPLETE 0x0E
 #define HCI_EVENT_HARDWARE_ERROR 0x10
 
-#define HCI_EVT_PLYD_OPCODE_IDX 1
-#define HCI_EVT_PLYD_STATUS_IDX 3
-#define HCI_EVT_PLYD_SUBCODE_IDX 4
+#define HCI_EVT_PYLD_OPCODE_IDX 1
+#define HCI_EVT_PYLD_STATUS_IDX 3
+#define HCI_EVT_PYLD_SUBCODE_IDX 4
 
 #define STREAM_TO_UINT16(u16, p)                                \
   do {                                                          \
@@ -207,7 +207,7 @@ extern bool enable_pdn_recovery;
 extern wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num];
 extern wakeup_adv_pattern_config_t wakeup_adv_config;
 extern wakeup_scan_param_config_t wakeup_scan_param_config;
-extern wakeup_local_param_config_t wakup_local_param_config;
+extern wakeup_local_param_config_t wakeup_local_param_config;
 extern bool lpm_configured;
 extern int mchar_fd;
 extern bool wakeup_enable_uart_low_config;

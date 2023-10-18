@@ -62,7 +62,7 @@
 #define BOOT_HEADER 0xa5
 #define BOOT_HEADER_ACK 0x5a
 #define HELPER_HEADER 0xa6
-#define HELPER_HEADR_ACK 0x6a
+#define HELPER_HEADER_ACK 0x6a
 #define HELPER_TIMEOUT_ACK 0x6b
 #define VERSION_HEADER 0xaa
 
@@ -92,7 +92,7 @@ static BOOLEAN b16BytesData = FALSE;
 // Handler of File
 static FILE* pFile = NULL;
 
-// CMD5 patch to change bootloader timeout to 2 seconds
+// CMD5 patch to change boot loader timeout to 2 seconds
 uint8 ucCmd5Patch[28] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                          0x00, 0x0C, 0x00, 0x00, 0x00, 0x9D, 0x32,
                          0xBB, 0x11, 0x2C, 0x94, 0x00, 0xA8, 0xEC,
@@ -144,7 +144,7 @@ static BOOLEAN fw_upload_WaitForHeaderSignature(uint32 uiMs) {
       if (uiMs) {
         currTime = fw_upload_GetTime();
         if (currTime - startTime > uiMs) {
-          VND_LOGE("Signature wait timmedout %d", uiMs);
+          VND_LOGE("Signature wait timedout %d", uiMs);
           bResult = FALSE;
           break;
         }
@@ -560,7 +560,7 @@ static uint16 fw_upload_WaitFor_ErrCode() {
     VND_LOGV("Error Code is %d", uiError);
     if (uiError == 0) {
       // Successful. Send back the ack.
-      fw_upload_ComWriteChar(mchar_fd, (int8)HELPER_HEADR_ACK);
+      fw_upload_ComWriteChar(mchar_fd, (int8)HELPER_HEADER_ACK);
     } else {
       VND_LOGV("Helper NAK or CRC or Timeout");
       // NAK/CRC/Timeout
@@ -603,7 +603,7 @@ static void fw_upload_SendLenBytesToHelper(uint8* pFileBuffer,
                                            uint16 uiLenToSend, uint32 ulOffset)
 
 {
-  // Retransmittion of previous block
+  // Retransmition of previous block
   if (ulOffset == ulLastOffsetToSend) {
     VND_LOGV("Retx offset %d...", ulOffset);
     fw_upload_ComWriteChars(mchar_fd, (uint8*)ucByteBuffer, uiLenToSend);

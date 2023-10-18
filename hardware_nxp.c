@@ -143,7 +143,7 @@ static void wakeup_event_handler(uint8_t sub_ocf);
 /*================================ Global Vars================================*/
 
 static struct {
-  /*Pointer to Hardware Configuation Array*/
+  /*Pointer to Hardware Configuration Array*/
   hw_config_fun_ptr* seq_arr;
   /*Size of seq_arr array*/
   uint8_t size;
@@ -557,7 +557,7 @@ static void hw_config_process_packet(void* packet) {
             }
             break;
           case HCI_CMD_NXP_READ_FW_REVISION: {
-            VND_LOGD("%s Read FW version reply recieved", __func__);
+            VND_LOGD("%s Read FW version reply received", __func__);
             if ((status == 0) && (len >= 14)) {
               if (len >= 15) {
                 VND_LOGI("FW version: %d.%d.%d.p%d.%d", stream[8], stream[7],
@@ -579,7 +579,7 @@ static void hw_config_process_packet(void* packet) {
                      *(p_tmp + 5), *(p_tmp + 4), *(p_tmp + 3), *(p_tmp + 2),
                      *(p_tmp + 1), *p_tmp);
             if (use_controller_addr && !IS_DEFAULT_BDADDR(p_tmp)) {
-              ++hw_config.indx; /*Skip writting bd address*/
+              ++hw_config.indx; /*Skip writing bd address*/
             }
           } break;
           case HCI_CMD_NXP_WRITE_BD_ADDRESS: {
@@ -678,7 +678,7 @@ static int8 bt_bdaddress_set(void) {
   if (packet) {
     memcpy(&packet->data[3], write_bd_address, WRITE_BD_ADDRESS_SIZE);
     VND_LOGD(
-        "Writting new BD Address %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
+        "Writing new BD Address %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
         write_bd_address[7], write_bd_address[6], write_bd_address[5],
         write_bd_address[4], write_bd_address[3], write_bd_address[2]);
     ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
@@ -969,7 +969,7 @@ static int8 hw_bt_enable_max_power_level_cmd(void) {
  **
  ** Function:      hw_bt_enable_independent_reset
  **
- ** Description:   Sends command to enable Inband / OutofBand independent reset
+ ** Description:   Sends command to enable Inband / Out of Band independent reset
  **
  ** Return Value:  0 if success, -1 otherwise
  **
@@ -1056,7 +1056,7 @@ static void* send_heartbeat_thread(void* data) {
   VND_LOGD("Starting Heartbeat Thread");
   signal(SIGUSR1, kill_thread_signal_handler);
   while (send_heartbeat) {
-    fw_upload_DelayInMs(wakup_local_param_config.heartbeat_timer_value * 100);
+    fw_upload_DelayInMs(wakeup_local_param_config.heartbeat_timer_value * 100);
     pthread_mutex_lock(&mtx_wakeup);
     packet = make_command(opcode, HCI_CMD_NXP_SUB_OCF_SIZE);
     if (packet) {
@@ -1103,7 +1103,7 @@ int8 hw_bt_send_wakeup_disable_raw(void) {
 ** Function         set_wakeup_local_parameter
 **
 ** Description      Configure controller to pull controller specific UART lines
-*                   to low when HEARTBEAT timer is timmed out on controller
+*                   to low when HEARTBEAT timer is timed out on controller
 **
 ** Returns          None
 **
@@ -1225,7 +1225,7 @@ static int8 set_wakeup_scan_parameter(void) {
       packet->data[8] = (unsigned char)(wakeup_scan_param_config.window >> 8);
       packet->data[9] = wakeup_scan_param_config.own_addr_type;
       packet->data[10] = wakeup_scan_param_config.scan_filter_policy;
-      VND_LOGD("wakeup %s send out paramter, %d, %d, %d, %d, %d", __func__,
+      VND_LOGD("wakeup %s send out paramater, %d, %d, %d, %d, %d", __func__,
                wakeup_scan_param_config.le_scan_type,
                (packet->data[5] | (packet->data[6] << 8)),
                (packet->data[7] | (packet->data[8] << 8)),
@@ -1255,7 +1255,7 @@ static int8 set_wakeup_local_parameter(void) {
         opcode, HCI_CMD_NXP_SUB_OCF_SIZE + HCI_CMD_NXP_LOCAL_PARAM_CONFIG_SIZE);
     if (packet) {
       packet->data[3] = HCI_CMD_NXP_SUB_OCF_LOCAL_PARAM_CONFIG;
-      packet->data[4] = wakup_local_param_config.heartbeat_timer_value;
+      packet->data[4] = wakeup_local_param_config.heartbeat_timer_value;
       ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
     }
   }

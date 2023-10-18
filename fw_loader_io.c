@@ -39,7 +39,7 @@
 
 /*================================== Typedefs=================================*/
 
-/*================================ Varaibles =================================*/
+/*================================ Variables =================================*/
 
 /*============================ Function Prototypes ===========================*/
 
@@ -350,14 +350,14 @@ uint32 fw_upload_GetBufferSize(int32 mchar_fd) {
 uint64 fw_upload_GetTime(void) {
   struct timespec time;
   clockid_t clk_id;
-  uint64 millsectime = -1;
+  uint64 millisectime = -1;
 
   clk_id = CLOCK_MONOTONIC;
   if (!clock_gettime(clk_id, &time)) {
-    millsectime =
+    millisectime =
         (((uint64)time.tv_sec) * 1000) + (((uint64)time.tv_nsec) / 1000000);
   } else {
     VND_LOGE("clock_gettime error:%s (%d)", strerror(errno), errno);
   }
-  return millsectime;
+  return millisectime;
 }

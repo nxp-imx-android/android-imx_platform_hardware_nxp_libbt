@@ -111,13 +111,13 @@ static int made_table = 0;
 static unsigned long crc_table[256];
 static BOOLEAN cmd7_Req = FALSE;
 static BOOLEAN EntryPoint_Req = FALSE;
-static uint32 change_baudrata_buffer_len = 0;
+static uint32 change_baudrate_buffer_len = 0;
 static uint32 cmd7_change_timeout_len = 0;
 static uint32 cmd5_len = 0;
 static BOOLEAN send_poke = TRUE;
 static uint16 chip_id = 0;
 static uint8 m_Buffer_Poke[2] = {0xdc, 0xe9};
-// CMD5 Header to change bootload baud rate
+// CMD5 Header to change bootloader baud rate
 uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
                                   0x00, 0x00, 0x2c, 0x00, 0x00, 0x00,
                                   0x77, 0xdb, 0xfd, 0xe0};
@@ -242,7 +242,7 @@ char* get_time() {
  * Name: gen_crc_table
  *
  * Description:
- *   Genrate crc table
+ *   Generate crc table
  *
  * Conditions For Use:
  *   None.
@@ -1042,7 +1042,7 @@ static void fw_upload_GetLast5Bytes(uint8* buf) {
 
   fw_upload_GetHeaderStartBytes(ucString);
   if (fw_upload_lenValid(&uiTempLen, ucString) == TRUE) {
-    // Valid length recieved
+    // Valid length received
     VND_LOGV(" Valid length = %d ", uiTempLen);
   }
 
@@ -1310,7 +1310,7 @@ static uint16 fw_upload_V1SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend) {
  *****************************************************************************/
 static void fw_upload_V3SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend,
                                      uint32 ulOffset) {
-  // Retransmittion of previous block
+  // Retransmition of previous block
   if (ulOffset == ulLastOffsetToSend) {
     VND_LOGV("Resend offset %d...", ulOffset);
     fw_upload_ComWriteChars(mchar_fd, ucByteBuffer, uiLenToSend);
@@ -1323,10 +1323,10 @@ static void fw_upload_V3SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend,
     //  We can clear the ucByteBuffer and populate fresh data.
     memset(ucByteBuffer, 0, MAX_LENGTH * sizeof(uint8));
     memcpy(ucByteBuffer,
-           pFileBuffer + ulOffset - change_baudrata_buffer_len -
+           pFileBuffer + ulOffset - change_baudrate_buffer_len -
                cmd7_change_timeout_len - cmd5_len,
            uiLenToSend);
-    ulCurrFileSize = ulOffset - change_baudrata_buffer_len -
+    ulCurrFileSize = ulOffset - change_baudrate_buffer_len -
                      cmd7_change_timeout_len - cmd5_len + uiLenToSend;
 #ifdef TEST_CODE
 
@@ -1482,7 +1482,7 @@ static void fw_upload_V3SendLenBytes(uint8* pFileBuffer, uint16 uiLenToSend,
  * Arguments:
  *   pPortName:        Serial port value.
  *   iFirstBaudRate:   The default baud rate of boot rom.
- *   iSecondBaudRate:  The chaned baud rate.
+ *   iSecondBaudRate:  The changed baud rate.
  *
  * Return Value:
  *   TRUE:            Change baud rate successfully
@@ -1589,7 +1589,7 @@ static int32 fw_Change_Baudrate(int8* pPortName, int32 iFirstBaudRate,
       if (ucLoadPayload) {
         if (uiProVer == Ver3) {
           VND_LOGD("Baudrate changed successfully");
-          change_baudrata_buffer_len = HDR_LEN + uiNewLen;
+          change_baudrate_buffer_len = HDR_LEN + uiNewLen;
         }
         break;
       }
@@ -1744,7 +1744,7 @@ static int32 fw_Change_Timeout() {
         break;
       }
     } else {
-      VND_LOGV(" wait for head sig tiemout");
+      VND_LOGV(" wait for head sig timeout");
       break;
     }
   }
@@ -1795,7 +1795,7 @@ int bt_send_cmd5_data_ver3(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
           tcflush(mchar_fd, TCIFLUSH);
           fw_upload_Send_Ack(V3_TIMEOUT_ACK);
           if (uiNewError & BT_MIC_FAIL_BIT) {
-            change_baudrata_buffer_len = 0;
+            change_baudrate_buffer_len = 0;
             cmd5_len = 0;
             ulCurrFileSize = 0;
             ulLastOffsetToSend = 0xFFFF;
@@ -1856,7 +1856,7 @@ int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
     tcflush(mchar_fd, TCIFLUSH);
     ret_value =
         fw_upload_SendBuffer(HDR_LEN, cmd5_data, !read_sig_hdr_after_cmd5);
-    VND_LOGV("CMD5 sent succesfully");
+    VND_LOGV("CMD5 sent successfully");
   }
   return ret_value;
 }
@@ -1897,7 +1897,7 @@ void fw_loader_get_default_fw_name(char fw_name[], uint32 fw_name_size) {
  *
  * Function:      bt_get_fw_config_cmd5_data
  *
- * Description:   Fetch FW conig CMD5 based on conf file settings
+ * Description:   Fetch FW config CMD5 based on conf file settings
  *
  * Arguments: NA
  *
@@ -2085,7 +2085,7 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
   VND_LOGD("Closing FW file");
   // Jump to here in case of protocol resync.
   if (setjmp(resync) > 1) {
-    VND_LOGV("Some error occured");
+    VND_LOGV("Some error occurred");
     free(pFileBuffer);
     return UNEXPECTED_BEHAVIOUR_IN_SETJMP;
   }
@@ -2140,7 +2140,7 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
             tcflush(mchar_fd, TCIFLUSH);
             fw_upload_Send_Ack(V3_TIMEOUT_ACK);
             if (uiNewError & BT_MIC_FAIL_BIT) {
-              change_baudrata_buffer_len = 0;
+              change_baudrate_buffer_len = 0;
               cmd5_len = 0;
               ulCurrFileSize = 0;
               ulLastOffsetToSend = 0xFFFF;
@@ -2158,7 +2158,7 @@ static uint32 fw_upload_FW(int8* pPortName, int32 iBaudRate, int8* pFileName,
             if (fseek(pFile, 0, SEEK_SET) < 0) {
               VND_LOGE("fseek error: %s (%d)", strerror(errno), errno);
             }
-            change_baudrata_buffer_len = 0;
+            change_baudrate_buffer_len = 0;
             cmd5_len = 0;
             ulCurrFileSize = 0;
             ulLastOffsetToSend = 0xFFFF;

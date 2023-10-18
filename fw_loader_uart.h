@@ -20,7 +20,7 @@
  *
  *  Filename:      fw_loader_uart.h
  *
- *  Description:   Firmware loader vesion 1 and 3 function declarations
+ *  Description:   Firmware loader version 1 and 3 function declarations
  *
  ******************************************************************************/
 

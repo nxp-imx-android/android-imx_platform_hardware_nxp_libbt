@@ -48,8 +48,9 @@ extern int vhal_trace_level;
 #if (BT_TRACE_LEVEL_ERROR <= VHAL_LOG_LEVEL)
 #define VND_LOGE(fmt, ...)                                           \
   {                                                                  \
-    if (vhal_trace_level >= BT_TRACE_LEVEL_ERROR)                    \
+    if (vhal_trace_level >= BT_TRACE_LEVEL_ERROR) {                  \
       ALOGE("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    }                                                                \
   }
 #else
 #define VND_LOGE(fmt, ...)
@@ -58,8 +59,9 @@ extern int vhal_trace_level;
 #if (BT_TRACE_LEVEL_WARNING <= VHAL_LOG_LEVEL)
 #define VND_LOGW(fmt, ...)                                           \
   {                                                                  \
-    if (vhal_trace_level >= BT_TRACE_LEVEL_WARNING)                  \
+    if (vhal_trace_level >= BT_TRACE_LEVEL_WARNING) {                \
       ALOGW("%s(L%d): " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    }                                                                \
   }
 #else
 #define VND_LOGW(fmt, ...)

@@ -98,7 +98,7 @@ uint8 ucCmd5Patch[28] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                          0xBB, 0x11, 0x2C, 0x94, 0x00, 0xA8, 0xEC,
                          0x70, 0x02, 0x00, 0xB4, 0xD9, 0x9D, 0x26};
 
-jmp_buf resync;  // Protocol restart buffer used in timeout cases.
+static jmp_buf resync;  // Protocol restart buffer used in timeout cases.
 /*============================ Function Prototypes ===========================*/
 
 /*============================== Coded Procedures ============================*/
@@ -252,7 +252,8 @@ static uint16 fw_upload_WaitFor_Len(FILE* pFile) {
  *
  *****************************************************************************/
 static void fw_upload_GetHeaderStartBytes(uint8* ucStr) {
-  BOOLEAN ucDone = FALSE, ucStringCnt = 0, i;
+  BOOLEAN ucDone = FALSE;
+  uint8 ucStringCnt = 0, i;
 
   while (!ucDone) {
     ucRcvdHeader = 0xFF;
@@ -773,7 +774,7 @@ static BOOLEAN fw_upload_FW(int8* pFileName) {
     VND_LOGE("Error: %s (%d)", strerror(errno), errno);
     return bRetVal;
   }
-  uiTotalFileSize =(uint32) TotalFileSize;
+  uiTotalFileSize = (uint32)TotalFileSize;
 
   pFileBuffer = (uint8*)malloc(uiTotalFileSize);
 

@@ -96,7 +96,7 @@ static int send_hci_reset(void);
 /*================================ Variables =================================*/
 int mchar_fd = 0;
 int vhal_trace_level = BT_TRACE_LEVEL_INFO;
-struct termios ti;
+static struct termios ti;
 static uint8_t adapterState;
 unsigned char* bdaddr = NULL;
 const bt_vendor_callbacks_t* vnd_cb = NULL;
@@ -117,12 +117,12 @@ uint8_t independent_reset_gpio_pin = 0xFF;
 bool enable_sco_config = TRUE;
 bool enable_pdn_recovery = FALSE;
 bool use_controller_addr = TRUE;
-uint8_t ir_host_gpio_pin = 14;
+static uint8_t ir_host_gpio_pin = 14;
 static char chrdev_name[32] = "/dev/gpiochip5";
 /* 0:disable IR(default); 1:OOB IR(FW Config); 2:Inband IR;*/
 uint8_t independent_reset_mode = IR_MODE_NONE;
 /* 0:disable OOB IR Trigger; 1:RFKILL Trigger; 2:GPIO Trigger;*/
-uint8_t send_oob_ir_trigger = IR_TRIGGER_NONE;
+static uint8_t send_oob_ir_trigger = IR_TRIGGER_NONE;
 bool enable_heartbeat_config = FALSE;
 bool wakeup_enable_uart_low_config = FALSE;
 char pFilename_fw_init_config_bin[MAX_PATH_LEN];
@@ -159,7 +159,7 @@ static bool send_boot_sleep_trigger = FALSE;
 char pFilename_cal_data[MAX_PATH_LEN];
 static int rfkill_id = -1;
 static char* rfkill_state_path = NULL;
-int last_baudrate = 0;
+static int last_baudrate = 0;
 wakeup_gpio_config_t wakeup_gpio_config[wakeup_key_num] = {
     {.gpio_pin = 13, .high_duration = 2, .low_duration = 2},
     {.gpio_pin = 13, .high_duration = 4, .low_duration = 4}};
@@ -169,8 +169,8 @@ wakeup_scan_param_config_t wakeup_scan_param_config = {.le_scan_type = 0,
                                                        .window = 96,
                                                        .own_addr_type = 0,
                                                        .scan_filter_policy = 0};
-wakeup_local_param_config_t wakeup_local_param_config = {.heartbeat_timer_value =
-                                                            8};
+wakeup_local_param_config_t wakeup_local_param_config = {
+    .heartbeat_timer_value = 8};
 
 /*============================== Coded Procedures ============================*/
 
@@ -353,7 +353,9 @@ static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
   int i = 0;
   int j = 7;
   int len = 0;
-  if (p_conf_value == NULL) return 0;
+  if (p_conf_value == NULL) {
+    return 0;
+  }
   len = strnlen(p_conf_value, BD_STR_ADDR_LEN + 1);
   if (len != BD_STR_ADDR_LEN) {
     VND_LOGE("Invalid string length, unable to process");
@@ -361,8 +363,12 @@ static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
     return 0;
   }
   for (i = 0; i < BD_STR_ADDR_LEN; i++) {
-    if (((i + 1) % 3) == 0 && p_conf_value[i] != ':') return 0;
-    if (((i + 1) % 3) != 0 && !isxdigit(p_conf_value[i])) return 0;
+    if (((i + 1) % 3) == 0 && p_conf_value[i] != ':') {
+      return 0;
+    }
+    if (((i + 1) % 3) != 0 && !isxdigit(p_conf_value[i])) {
+      return 0;
+    }
     char tmp = p_conf_value[i];
     if (isupper(p_conf_value[i])) {
       p_conf_value[i] = p_conf_value[i] - 'A' + 10;
@@ -370,10 +376,11 @@ static int set_bd_address_buf(char* p_conf_name, char* p_conf_value,
       p_conf_value[i] = p_conf_value[i] - 'a' + 10;
     } else if (isdigit(p_conf_value[i])) {
       p_conf_value[i] = p_conf_value[i] - '0';
-    } else if (p_conf_value[i] == ':')
+    } else if (p_conf_value[i] == ':') {
       p_conf_value[i] = tmp;
-    else
+    } else {
       return 0;
+    }
   }
   for (i = 0; i < BD_STR_ADDR_LEN; i = i + 3) {
     write_bd_address[j--] = (p_conf_value[i] << 4) | p_conf_value[i + 1];
@@ -701,15 +708,15 @@ static const conf_entry_t conf_table[] = {
 **
 *******************************************************************************/
 static void vnd_load_conf(const char* p_path) {
-  FILE* p_file;
+  FILE* p_file = NULL;
   char* p_name;
   char* p_value;
-  conf_entry_t* p_entry;
+  const conf_entry_t* p_entry;
   char line[CONF_MAX_LINE_LEN + 1]; /* add 1 for \0 char */
 
   VND_LOGD("Attempt to load conf from %s", p_path);
-
-  if ((p_file = fopen(p_path, "r")) != NULL) {
+  p_file = fopen(p_path, "r");
+  if (p_file != NULL) {
     /* read line by line */
     while (fgets(line, CONF_MAX_LINE_LEN + 1, p_file) != NULL) {
       if (line[0] == CONF_COMMENT) continue;
@@ -758,8 +765,8 @@ static void vnd_load_conf(const char* p_path) {
  *
  *****************************************************************************/
 
-int read_hci_event(hci_event* evt_pkt, uint64_t retry_delay_ms,
-                   uint32_t max_duration_ms) {
+static int read_hci_event(hci_event* evt_pkt, uint64_t retry_delay_ms,
+                          uint32_t max_duration_ms) {
   int remain, r;
   int count;
   uint32_t total_duration = 0;
@@ -853,6 +860,7 @@ static int8_t check_hci_event_status(hci_event* evt_pkt, uint16_t opcode) {
       break;
     default:
       VND_LOGE("Invalid Event type %02x received ", evt_pkt->info.event_type);
+      break;
   }
   VND_LOGV("Packet dump");
   for (int i = 0; i < evt_pkt->info.para_len + HCI_PACKET_TYPE_SIZE +
@@ -882,8 +890,9 @@ static int8_t read_hci_event_status(int16_t opcode, uint64_t retry_delay_ms,
                                     uint64_t max_duration_ms) {
   int8_t ret = -1;
   hci_event evt_pkt;
+  memset(&evt_pkt, 0x00, sizeof(evt_pkt));
   uint64_t start_ms = fw_upload_GetTime();
-  uint64_t cost_ms;
+  uint64_t cost_ms = 0;
   uint64_t remaining_time_ms = max_duration_ms;
   VND_LOGD("Reading %s event", hw_bt_cmd_to_str(opcode));
   while (((cost_ms = fw_upload_GetTime() - start_ms) < max_duration_ms) &&
@@ -923,7 +932,7 @@ static int send_hci_reset(void) {
   return ret;
 }
 
-void set_prop_int32(char* name, int value) {
+void set_prop_int32(const char* name, int value) {
   char init_value[PROPERTY_VALUE_MAX];
   int ret;
 
@@ -937,7 +946,7 @@ void set_prop_int32(char* name, int value) {
   return;
 }
 
-int get_prop_int32(char* name) {
+int get_prop_int32(const char* name) {
   int ret;
 
   ret = property_get_int32(name, -1);
@@ -959,38 +968,55 @@ int get_prop_int32(char* name) {
  *****************************************************************************/
 
 static int32 uart_speed(int32 s) {
+  int32 ret = 0;
   switch (s) {
     case 9600:
-      return B9600;
+      ret = B9600;
+      break;
     case 19200:
-      return B19200;
+      ret = B19200;
+      break;
     case 38400:
-      return B38400;
+      ret = B38400;
+      break;
     case 57600:
-      return B57600;
+      ret = B57600;
+      break;
     case 115200:
-      return B115200;
+      ret = B115200;
+      break;
     case 230400:
-      return B230400;
+      ret = B230400;
+      break;
     case 460800:
-      return B460800;
+      ret = B460800;
+      break;
     case 500000:
-      return B500000;
+      ret = B500000;
+      break;
     case 576000:
-      return B576000;
+      ret = B576000;
+      break;
     case 921600:
-      return B921600;
+      ret = B921600;
+      break;
     case 1000000:
-      return B1000000;
+      ret = B1000000;
+      break;
     case 1152000:
-      return B1152000;
+      ret = B1152000;
+      break;
     case 1500000:
-      return B1500000;
+      ret = B1500000;
+      break;
     case 3000000:
-      return B3000000;
+      ret = B3000000;
+      break;
     default:
-      return B0;
+      ret = B0;
+      break;
   }
+  return ret;
 }
 /******************************************************************************
  **
@@ -1003,38 +1029,55 @@ static int32 uart_speed(int32 s) {
  *****************************************************************************/
 
 static int32 uart_speed_translate(int32 s) {
+  int32 ret = 0;
   switch (s) {
     case B9600:
-      return 9600;
+      ret = 9600;
+      break;
     case B19200:
-      return 19200;
+      ret = 19200;
+      break;
     case B38400:
-      return 38400;
+      ret = 38400;
+      break;
     case B57600:
-      return 57600;
+      ret = 57600;
+      break;
     case B115200:
-      return 115200;
+      ret = 115200;
+      break;
     case B230400:
-      return 230400;
+      ret = 230400;
+      break;
     case B460800:
-      return 460800;
+      ret = 460800;
+      break;
     case B500000:
-      return 500000;
+      ret = 500000;
+      break;
     case B576000:
-      return 576000;
+      ret = 576000;
+      break;
     case B921600:
-      return 921600;
+      ret = 921600;
+      break;
     case B1000000:
-      return 1000000;
+      ret = 1000000;
+      break;
     case B1152000:
-      return 1152000;
+      ret = 1152000;
+      break;
     case B1500000:
-      return 1500000;
+      ret = 1500000;
+      break;
     case B3000000:
-      return 3000000;
+      ret = 3000000;
+      break;
     default:
-      return 0;
+      ret = 0;
+      break;
   }
+  return ret;
 }
 
 /******************************************************************************
@@ -1260,7 +1303,13 @@ static int detect_and_download_fw() {
     }
 
     tcflush(mchar_fd, TCIFLUSH);
-    if (uart_sleep_after_dl) usleep(uart_sleep_after_dl * 1000);
+    if (uart_sleep_after_dl > 0) {
+      usleep(uart_sleep_after_dl * 1000);
+    }
+    if (enable_pdn_recovery) {
+      ALOGI("%s:%d\n", PROP_VENDOR_TRIGGER_PDN,
+            get_prop_int32(PROP_VENDOR_TRIGGER_PDN));
+    }
   }
 done:
   return download_ret;
@@ -1299,7 +1348,8 @@ static int config_uart() {
       }
       VND_LOGV("start read hci event");
       if (read_hci_event_status(HCI_CMD_NXP_CHANGE_BAUDRATE,
-                                POLL_CONFIG_UART_MS, POLL_MAX_TIMEOUT_MS) != 0) {
+                                POLL_CONFIG_UART_MS,
+                                POLL_MAX_TIMEOUT_MS) != 0) {
         VND_LOGE("Failed to read set baud rate command response! ");
         return -1;
       }
@@ -1388,7 +1438,7 @@ static int bt_vnd_init_rfkill() {
   }
 }
 
-int bt_vnd_set_bluetooth_power(BOOLEAN bt_turn_on) {
+static int bt_vnd_set_bluetooth_power(BOOLEAN bt_turn_on) {
   int sz;
   int fd = -1;
   int ret = -1;
@@ -1427,7 +1477,7 @@ done:
   return ret;
 }
 
-void bt_vnd_gpio_configuration(int value) {
+static void bt_vnd_gpio_configuration(int value) {
   struct gpiohandle_request req;
   struct gpiohandle_data data;
   int fd = 0, ret = 0;

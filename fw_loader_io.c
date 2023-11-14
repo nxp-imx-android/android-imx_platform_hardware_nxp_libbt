@@ -170,13 +170,14 @@ void fw_upload_DelayInMs(uint32 uiMs) {
 int32 fw_upload_ComReadChar(int32 mchar_fd) {
   int32 iResult = 0;
   uint8 ucNumCharToRead = 1;
-
+  int32 ret =0;
   if (read(mchar_fd, &iResult, ucNumCharToRead) == ucNumCharToRead) {
-    return (iResult & 0xFF);
+    ret = (iResult & 0xFF);
   } else {
-    VND_LOGV("Read error: %s (%d)", strerror(errno), errno);
-    return RW_FAILURE;
+    //  VND_LOGV("Read error: %s (%d)", strerror(errno), errno);
+    ret = RW_FAILURE;
   }
+  return ret;
 }
 
 /******************************************************************************
@@ -205,8 +206,8 @@ int32 fw_upload_ComReadChar(int32 mchar_fd) {
 void fw_upload_ComReadChars(int32 mchar_fd, uint8* pBuffer, uint32 uiCount) {
   if ((uint32)read(mchar_fd, pBuffer, uiCount) != uiCount) {
     VND_LOGV("Read error: %s (%d)", strerror(errno), errno);
-    return;
   }
+  return;
 }
 
 /******************************************************************************

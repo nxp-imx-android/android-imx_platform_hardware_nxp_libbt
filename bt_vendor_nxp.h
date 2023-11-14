@@ -43,7 +43,7 @@
 
 /*================================== Macros ==================================*/
 
-#define BT_HAL_VERSION "009.021"
+#define BT_HAL_VERSION "009.022"
 
 #define TIMEOUT_SEC 6
 #define RW_SUCCESSFUL (1)
@@ -221,10 +221,10 @@ extern uint8_t enable_poke_controller;
 
 void hw_config_start(void);
 int32 init_uart(int8* dev, int32 dwBaudRate, uint8 ucFlowCtrl);
-int get_prop_int32(char* name);
-void set_prop_int32(char* name, int value);
+int get_prop_int32(const char* name);
+void set_prop_int32(const char* name, int value);
 int8 hw_bt_send_wakeup_disable_raw(void);
 int8 hw_bt_send_hci_cmd_raw(uint16_t opcode);
 int8 hw_send_change_baudrate_raw(uint32_t baudrate);
-char* hw_bt_cmd_to_str(uint16_t cmd);
+const char* hw_bt_cmd_to_str(uint16_t cmd);
 #endif  // BT_VENDOR_NXP_H

@@ -38,8 +38,8 @@ extern int mchar_fd;
 
 /*============================ Function Prototypes ===========================*/
 
-void init_crc8();
-BOOLEAN bt_vnd_mrvl_check_fw_status_v2();
+void init_crc8(void);
+BOOLEAN bt_vnd_mrvl_check_fw_status_v2(void);
 int bt_vnd_mrvl_download_fw_v2(int8* pPortName, int32 iBaudRate,
                                int8* pFileName);
 #endif  // FW_LOADER_V2_H

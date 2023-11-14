@@ -118,17 +118,17 @@ static BOOLEAN send_poke = TRUE;
 static uint16 chip_id = 0;
 static uint8 m_Buffer_Poke[2] = {0xdc, 0xe9};
 // CMD5 Header to change bootloader baud rate
-uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                  0x00, 0x00, 0x2c, 0x00, 0x00, 0x00,
-                                  0x77, 0xdb, 0xfd, 0xe0};
-uint8 m_Buffer_CMD7_ChangeTimeoutValue[16] = {
+static uint8 m_Buffer_CMD5_Header[16] = {0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x2c, 0x00, 0x00, 0x00,
+                                         0x77, 0xdb, 0xfd, 0xe0};
+static uint8 m_Buffer_CMD7_ChangeTimeoutValue[16] = {
     0x07, 0x00, 0x00, 0x00, 0x70, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x5b, 0x88, 0xf8, 0xba};
 #if (UART_DOWNLOAD_FW == TRUE)
-uint8 fw_init_config_bin[FW_INIT_CONFIG_LEN];
+static uint8 fw_init_config_bin[FW_INIT_CONFIG_LEN];
 #endif
 
-const UART_BAUDRATE UartCfgTbl[] = {
+static const UART_BAUDRATE UartCfgTbl[] = {
     {115200, 16, 0x0075F6FD},
     {3000000, 1, 0x00C00000},
 };
@@ -199,13 +199,13 @@ typedef enum {
   NXP_CHIPID_9177_A1 = 0x7601
 } NXP_CHIPID;
 
-soc_fw_name_dict_t soc_fw_name_dict[] = {
+static soc_fw_name_dict_t soc_fw_name_dict[] = {
     {NXP_CHIPID_9098_A1, "uart9098_bt_v1.bin"},
     {NXP_CHIPID_9098_A2, "uart9098_bt_v1.bin"},
     {NXP_CHIPID_9177_A0, "uartspi_n61x.bin"},
     {NXP_CHIPID_9177_A1, "uartspi_n61x_v1.bin"}};
 
-uint8 uiErrCnt[16] = {0};
+static uint8 uiErrCnt[16] = {0};
 static jmp_buf resync;  // Protocol restart buffer used in timeout cases.
 
 /*============================== Coded Procedures ============================*/
@@ -257,7 +257,7 @@ char* get_time() {
  *   None.
  *
  *****************************************************************************/
-void fw_upload_gen_crc_table() {
+static void fw_upload_gen_crc_table() {
   int i, j;
   unsigned long crc_accum;
 
@@ -298,8 +298,9 @@ void fw_upload_gen_crc_table() {
  *   None.
  *
  *****************************************************************************/
-unsigned long fw_upload_update_crc(unsigned long crc_accum, uint8* data_blk_ptr,
-                                   int data_blk_size) {
+static unsigned long fw_upload_update_crc(unsigned long crc_accum,
+                                          uint8* data_blk_ptr,
+                                          int data_blk_size) {
   int i, j;
 
   for (j = 0; j < data_blk_size; j++) {
@@ -817,7 +818,7 @@ static void fw_upload_Send_Ack(uint8 uiAck) {
  *   None.
  *
  *****************************************************************************/
-BOOLEAN fw_upload_Check_ReqCrc(uint8* uiStr, uint8 uiReq) {
+static BOOLEAN fw_upload_Check_ReqCrc(uint8* uiStr, uint8 uiReq) {
   uint8 uiCalCrc;
 
   if (uiReq == V3_HEADER_DATA_REQ) {
@@ -987,7 +988,8 @@ static uint32 fw_upload_GetCmd(uint8* buf) {
 
 *****************************************************************************/
 static void fw_upload_GetHeaderStartBytes(uint8* ucStr) {
-  BOOLEAN ucDone = FALSE, ucStringCnt = 0, i;
+  BOOLEAN ucDone = FALSE;
+  uint8 ucStringCnt = 0, i;
   while (!ucDone) {
     ucRcvdHeader = fw_upload_ComReadChar(mchar_fd);
 
@@ -1767,7 +1769,8 @@ static int32 fw_Change_Timeout() {
  *   -1 if CMD5 is not sent
  *   -2 if read_sig_hdr_after_cmd5 fails
  *****************************************************************************/
-int bt_send_cmd5_data_ver3(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
+static int bt_send_cmd5_data_ver3(uint8* cmd5_data,
+                                  BOOLEAN read_sig_hdr_after_cmd5) {
   BOOLEAN header_sent = FALSE;
   int8 ret_value = -1;
   if (cmd5_data != NULL) {
@@ -1830,7 +1833,8 @@ int bt_send_cmd5_data_ver3(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
  *    Len of next header if success and read_sig_hdr_after_cmd5 is true
  *   -1 if CMD5 is not sent
  *****************************************************************************/
-int bt_send_cmd5_data_ver1(uint8* cmd5_data, BOOLEAN read_sig_hdr_after_cmd5) {
+static int bt_send_cmd5_data_ver1(uint8* cmd5_data,
+                                  BOOLEAN read_sig_hdr_after_cmd5) {
   int ret_value = -1;
   int8 retry = 3;
   uint16 uiLenToSend = 0;

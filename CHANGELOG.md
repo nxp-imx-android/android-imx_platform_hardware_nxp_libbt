@@ -1,6 +1,16 @@
 # Change Log
 All notable changes in Bluetooth Vendor Hardware Abstraction Layer(BT VHAL) will be documented in this file.
 
+## [009.022] - 23-October-20
+
+### Fixed
+- Fixed Code Sonar warnings
+
+## [009.021] - 23-September-01
+
+### Fixed
+- Correction of typos
+
 ## [009.019] - 2023-July-27
 
 ### Fixed

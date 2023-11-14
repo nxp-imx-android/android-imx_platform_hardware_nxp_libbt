@@ -203,47 +203,65 @@ static uint8_t wake_gpio_config = 0;
  ** Return Value:  Opcode string if success, "unknown command" otherwise
  **
  *****************************************************************************/
-char* hw_bt_cmd_to_str(uint16_t cmd) {
+const char* hw_bt_cmd_to_str(uint16_t cmd) {
+  const char* str = "unknown command";
   switch (cmd) {
     case HCI_CMD_NXP_WRITE_PCM_SETTINGS:
-      return "write_pcm_settings";
+      str = "write_pcm_settings";
+      break;
     case HCI_CMD_NXP_WRITE_PCM_SYNC_SETTINGS:
-      return "write_pcm_sync_settings";
+      str = "write_pcm_sync_settings";
+      break;
     case HCI_CMD_NXP_WRITE_PCM_LINK_SETTINGS:
-      return "write_pcm_link_settings";
+      str = "write_pcm_link_settings";
+      break;
     case HCI_CMD_NXP_SET_SCO_DATA_PATH:
-      return "set_sco_data_path";
+      str = "set_sco_data_path";
+      break;
     case HCI_CMD_NXP_WRITE_VOICE_SETTINGS:
-      return "write_voice_settings";
+      str = "write_voice_settings";
+      break;
     case HCI_CMD_NXP_RESET:
-      return "hw_bt_send_reset";
+      str = "hw_bt_send_reset";
+      break;
     case HCI_CMD_NXP_READ_FW_REVISION:
-      return "hw_bt_read_fw_revision";
+      str = "hw_bt_read_fw_revision";
+      break;
     case HCI_CMD_NXP_INDEPENDENT_RESET_SETTING:
-      return "hw_bt_enable_independent_reset";
+      str = "hw_bt_enable_independent_reset";
+      break;
     case HCI_CMD_NXP_LOAD_CONFIG_DATA:
-      return "hw_bt_cal_data_load";
+      str = "hw_bt_cal_data_load";
+      break;
     case HCI_CMD_NXP_CUSTOM_OPCODE:
-      return "hw_ble_set_power_level";
+      str = "hw_ble_set_power_level";
+      break;
     case HCI_CMD_NXP_WRITE_BT_TX_POWER:
-      return "hw_bt_enable_max_power_level";
+      str = "hw_bt_enable_max_power_level";
+      break;
     case HCI_READ_LOCAL_BDADDR:
-      return "hw_config_read_bdaddr";
+      str = "hw_config_read_bdaddr";
+      break;
     case HCI_CMD_NXP_WRITE_BD_ADDRESS:
-      return "write_bd_address";
+      str = "write_bd_address";
+      break;
     case HCI_CMD_NXP_BLE_WAKEUP:
-      return "ble_wake_config";
+      str = "ble_wake_config";
+      break;
     case HCI_CMD_NXP_SET_BT_SLEEP_MODE:
-      return "configure_lpm";
+      str = "configure_lpm";
+      break;
     case HCI_CMD_INBAND_RESET:
-      return "inband_reset";
+      str = "inband_reset";
+      break;
     case HCI_CMD_NXP_CHANGE_BAUDRATE:
-      return "change_baudrate";
+      str = "change_baudrate";
+      break;
     default:
       break;
   }
 
-  return "unknown command";
+  return str;
 }
 /******************************************************************************
  **
@@ -255,7 +273,7 @@ char* hw_bt_cmd_to_str(uint16_t cmd) {
  ** Return Value:  0 if success, -1 otherwise
  **
  *****************************************************************************/
-int8 hw_bt_send_packet_raw(void* packet, uint32_t length) {
+static int8 hw_bt_send_packet_raw(void* packet, uint32_t length) {
   int8 ret = -1;
   uint8_t* ptr;
   if (packet) {
@@ -285,8 +303,8 @@ int8 hw_bt_send_packet_raw(void* packet, uint32_t length) {
  ** Return Value:  0 if success, -1 otherwise
  **
  *****************************************************************************/
-int8 hw_bt_send_packet(HC_BT_HDR* packet, uint16_t opcode,
-                       hw_config_reply_handler reply_handler) {
+static int8 hw_bt_send_packet(HC_BT_HDR* packet, uint16_t opcode,
+                              hw_config_reply_handler reply_handler) {
   int8 ret = -1;
   if (packet) {
     if (vnd_cb->xmit_cb(opcode, packet, reply_handler)) {
@@ -361,7 +379,7 @@ static void hw_sco_config_cb(void* p_mem) {
   HC_BT_HDR* p_evt_buf = (HC_BT_HDR*)p_mem;
   struct bt_evt_param_t evt_params = {0, 0};
   uint16_t cmd;
-  HC_BT_HDR* p_buf;
+  HC_BT_HDR* p_buf = NULL;
 
   assert(vnd_cb && p_mem);
 
@@ -401,8 +419,7 @@ static void hw_sco_config_cb(void* p_mem) {
       /* sco config succeeds */
       VND_LOGD("SCO PCM config succeeds!");
       vnd_cb->scocfg_cb(BT_VND_OP_RESULT_SUCCESS);
-      hw_config_next();
-      return;
+      break;
 
     default:
       VND_LOGE("Received event for unexpected cmd (0x%04hX). Fail.",
@@ -418,9 +435,10 @@ static void hw_sco_config_cb(void* p_mem) {
     else
       vnd_cb->dealloc(p_buf);
   }
-
-  VND_LOGE("Vendor lib scocfg aborted");
-  vnd_cb->scocfg_cb(BT_VND_OP_RESULT_FAIL);
+  if (evt_params.cmd != HCI_CMD_NXP_WRITE_VOICE_SETTINGS) {
+    VND_LOGE("Vendor lib scocfg aborted");
+    vnd_cb->scocfg_cb(BT_VND_OP_RESULT_FAIL);
+  }
   hw_config_next();
 }
 
@@ -636,7 +654,7 @@ static void hw_config_seq(void* packet) {
     ++hw_config.indx;
   }
   VND_LOGD("seq_indx=%d/%d", hw_config.indx, hw_config.size);
-  if (hw_config.indx < hw_config.size) {
+  if ((hw_config.indx < hw_config.size) && (hw_config.indx >= 0)) {
     if (hw_config_seq_arr[hw_config.indx]() != 0) {
       hw_config_next();
     }
@@ -677,10 +695,9 @@ static int8 bt_bdaddress_set(void) {
   packet = make_command(opcode, WRITE_BD_ADDRESS_SIZE);
   if (packet) {
     memcpy(&packet->data[3], write_bd_address, WRITE_BD_ADDRESS_SIZE);
-    VND_LOGD(
-        "Writing new BD Address %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
-        write_bd_address[7], write_bd_address[6], write_bd_address[5],
-        write_bd_address[4], write_bd_address[3], write_bd_address[2]);
+    VND_LOGD("Writing new BD Address %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
+             write_bd_address[7], write_bd_address[6], write_bd_address[5],
+             write_bd_address[4], write_bd_address[3], write_bd_address[2]);
     ret = hw_bt_send_packet(packet, opcode, hw_config_seq);
   }
   return ret;
@@ -778,7 +795,7 @@ static int8 hw_bt_send_reset(void) {
 **
 *******************************************************************************/
 int8 hw_bt_send_hci_cmd_raw(uint16_t opcode) {
-  uint8_t length;
+  uint8_t length = 0;
   VND_LOGD("Sending hci command 0x%04hX (%s)", opcode,
            hw_bt_cmd_to_str(opcode));
   return hw_bt_send_packet_raw(make_command_raw(opcode, 0, &length), length);
@@ -969,7 +986,7 @@ static int8 hw_bt_enable_max_power_level_cmd(void) {
  **
  ** Function:      hw_bt_enable_independent_reset
  **
- ** Description:   Sends command to enable Inband / Out of Band independent reset
+ ** Description:   Sends command to enable Inband/Out of Band independent reset
  **
  ** Return Value:  0 if success, -1 otherwise
  **
